@@ -14,8 +14,11 @@ import { ToolRegistry } from "../agent/tools.js";
 //	  tools: [{ name, description, parameters, run, timeoutMs }],
 //	}
 
-// Folders starting with "_" or "." are skipped, which is how the shipped example stays inert.
-const SKIP_PREFIX = /^[_.]/;
+// Two ways to keep a folder out of the way, both by name so nothing has to be moved:
+//   _name / .name  silently skipped (the shipped example, or anything hidden)
+//   -name          deliberately disabled; logged, so a rename is visibly confirmed
+const IGNORED_PREFIX = /^[_.]/;
+const DISABLED_PREFIX = /^-/;
 
 export async function loadPlugins(dir, { log } = {}) {
   let names;
@@ -28,10 +31,17 @@ export async function loadPlugins(dir, { log } = {}) {
 
   // Sorted, so the tool declarations go out in the same order on every request. Prompt prefixes
   // are what the provider caches, so a nondeterministic order would cost cache hits.
-  const folders = names
-    .filter((entry) => entry.isDirectory() && !SKIP_PREFIX.test(entry.name))
-    .map((entry) => entry.name)
-    .sort();
+  const folders = [];
+  for (const entry of names) {
+    if (!entry.isDirectory()) continue;
+    if (IGNORED_PREFIX.test(entry.name)) continue;
+    if (DISABLED_PREFIX.test(entry.name)) {
+      log?.info("plugin disabled by name", { plugin: entry.name, rename: entry.name.replace(/^-/, "") });
+      continue;
+    }
+    folders.push(entry.name);
+  }
+  folders.sort();
 
   const plugins = [];
   for (const folder of folders) {

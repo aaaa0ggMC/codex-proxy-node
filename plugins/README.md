@@ -3,8 +3,13 @@
 A plugin is a folder here. Create `plugins/<name>/index.js`, default-export an object, and its
 tools are offered to the model the next time the proxy starts. Nothing else to register.
 
-This folder ships as `plugins/_example` — folders starting with `_` or `.` are skipped, so the
-example is inert until you rename it.
+Folders are recognised by name, so nothing has to be moved around:
+
+| Name | Effect |
+| --- | --- |
+| `docs` | loaded |
+| `-docs` | **disabled**: skipped, and logged as disabled so you can see the rename took |
+| `_docs`, `.docs` | skipped silently (the shipped example uses `_example`) |
 
 ## Contract
 

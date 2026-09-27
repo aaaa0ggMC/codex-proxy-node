@@ -10,7 +10,7 @@ function collector() {
   return {
     lines,
     log: {
-      info: () => {},
+      info: (message, fields) => lines.push({ message, ...fields }),
       warn: () => {},
       error: (message, fields) => lines.push({ message, ...fields }),
       child: () => collector().log,
@@ -43,6 +43,22 @@ test("loadPlugins loads folders in sorted order and skips underscored ones", asy
 
   const plugins = await loadPlugins(dir);
   assert.deepEqual(plugins.map((p) => p.name), ["alpha", "zeta"]);
+});
+
+test("a folder renamed with a leading dash is disabled, not loaded", async () => {
+  const dir = await pluginDir({
+    "-docs": good("docs", "read"),
+    "live": good("live", "ok"),
+  });
+
+  const { lines, log } = collector();
+  const plugins = await loadPlugins(dir, { log });
+
+  assert.deepEqual(plugins.map((p) => p.name), ["live"]);
+  const disabled = lines.find((line) => line.message === "plugin disabled by name");
+  assert.ok(disabled, `expected a disable log in ${JSON.stringify(lines)}`);
+  assert.equal(disabled.plugin, "-docs");
+  assert.equal(disabled.rename, "docs", "the log should say what to rename it back to");
 });
 
 test("loadPlugins survives a broken plugin", async () => {
