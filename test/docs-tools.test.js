@@ -126,7 +126,7 @@ test("an inline attachment becomes an open document with a content-derived id", 
   const page = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 1 }));
   assert.match(page[0].text, /Intro to widgets/);
 
-  assert.equal(await registry.ingest({ filename: "notes.txt", data: "AAAA" }), null, "unrecognised types fall through");
+  assert.equal(await registry.ingest({ filename: "archive.zip", data: "AAAA" }), null, "unrecognised types fall through");
 });
 
 test("a chat file part is replaced by a descriptor before translation", async () => {

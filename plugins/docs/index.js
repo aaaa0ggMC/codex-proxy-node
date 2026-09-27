@@ -42,18 +42,24 @@ export default {
   // Chat attachments arrive as inline base64 rather than a path. Recognised ones become an open
   // document plus a short descriptor; anything else returns null so another plugin can try.
   async ingestFile({ filename, data }) {
-    const extension = path.extname(filename ?? "").toLowerCase();
-    if (extension !== ".pdf" && extension !== ".pptx" && extension !== ".docx") return null;
     if (typeof data !== "string" || data === "") {
       return `[attachment ${filename} has no inline data; only file_data is supported, so it was not read]`;
     }
-    const document = remember(await openDocumentFromBuffer(filename, Buffer.from(data, "base64")));
+    let document;
+    try {
+      document = await openDocumentFromBuffer(filename, Buffer.from(data, "base64"));
+    } catch (err) {
+      // An unknown format is not ours to claim; a format we do know but cannot parse is worth saying.
+      if (/unsupported document type/.test(err.message)) return null;
+      return `[attachment ${filename} could not be read: ${err.message}]`;
+    }
+    remember(document);
     return `Attachment received as doc ${document.id}\n${await outlineOf(document)}`;
   },
   tools: [
     {
       name: "open",
-      description: "Open a local .pdf, .pptx or .docx file and get its text, page by page.",
+      description: "Open a local document and get its text. Reads .pdf, .pptx, .docx, .xlsx, images, and text files such as .md, .txt, .csv and source code.",
       parameters: {
         type: "object",
         properties: { path: { type: "string", description: "Absolute path to the file" } },
@@ -120,6 +126,11 @@ export default {
         const number = Number(page);
         if (!Number.isInteger(number) || number < 1 || number > document.pageCount) {
           throw new Error(`page must be an integer between 1 and ${document.pageCount}`);
+        }
+        if (images === true && document.imageSupport === false) {
+          throw new Error(
+            `${document.kind} has no pages to render; drop images, or use a format that has them (.pdf, .pptx, .docx, an image file)`,
+          );
         }
         const text = (await document.text(number)).trim();
         let body = text || "(no text on this page)";

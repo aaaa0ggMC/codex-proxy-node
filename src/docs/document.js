@@ -6,6 +6,7 @@ import { stableId } from "../util.js";
 import { shrinkImage } from "./image.js";
 import { pdfPageCount, pdfTextByPage, renderPdfPage } from "./pdf.js";
 import { parseDocx } from "./docx.js";
+import { IMAGE_EXTENSIONS, TEXT_EXTENSIONS, parseXlsx } from "./sheet.js";
 import { parsePptx } from "./pptx.js";
 
 // A document exposes the same four things whether it came from a deck or a PDF: a page count, the
@@ -79,6 +80,7 @@ async function loadDocument({ id, file, name, extension, bytes }) {
       bytes,
       pageCount: deck.slides.length,
       pageLabel: "slide",
+      imageSupport: true,
       // Slide body only. Speaker notes are a separate field on purpose: mixing them into the
       // page text made a deck read like a transcript of the presenter view.
       text: async (page) => (deck.slides[page - 1]?.text ?? "").trim(),
@@ -92,6 +94,62 @@ async function loadDocument({ id, file, name, extension, bytes }) {
     };
   }
 
+  // Plain text, tables and code: there is nothing to render and nothing to paginate, so the file
+  // is one section of its own bytes.
+  if (TEXT_EXTENSIONS.includes(extension)) {
+    const body = await readFileBytes(file);
+    return {
+      id,
+      name,
+      kind: extension.slice(1),
+      bytes,
+      pageCount: 1,
+      pageLabel: "section",
+      imageSupport: false,
+      text: async () => body.toString("utf8"),
+      notes: async () => "",
+      images: async () => [],
+    };
+  }
+
+  if (extension === ".xlsx") {
+    const parsed = parseXlsx(await readFileBytes(file));
+    return {
+      id,
+      name,
+      kind: "xlsx",
+      bytes,
+      pageCount: parsed.sheets.length,
+      pageLabel: "sheet",
+      imageSupport: false,
+      text: async (page) => {
+        const sheet = parsed.sheets[page - 1];
+        if (sheet == null) return "";
+        return `# ${sheet.name}\n${sheet.csv}`;
+      },
+      notes: async () => "",
+      images: async () => [],
+    };
+  }
+
+  // An image file has no text and no pages: it is one section whose only content is the picture.
+  if (IMAGE_EXTENSIONS.includes(extension)) {
+    const body = await readFileBytes(file);
+    const mime = extension === ".png" ? "image/png" : extension === ".webp" ? "image/webp" : "image/jpeg";
+    return {
+      id,
+      name,
+      kind: "image",
+      bytes,
+      pageCount: 1,
+      pageLabel: "image",
+      imageSupport: true,
+      text: async () => "",
+      notes: async () => "",
+      images: async () => [await shrinkImage(body, mime)],
+    };
+  }
+
   if (extension === ".docx") {
     const parsed = parseDocx(await readFileBytes(file));
     return {
@@ -102,7 +160,7 @@ async function loadDocument({ id, file, name, extension, bytes }) {
       // Word does not paginate in the file, so there is one section rather than invented pages.
       pageCount: 1,
       pageLabel: "section",
-      text: async () => parsed.text,
+      imageSupport: parsed.images.length > 0,
       notes: async () => "",
       images: async () => Promise.all(parsed.images.map((image) => shrinkImage(image.data, image.mime))),
     };
@@ -118,13 +176,16 @@ async function loadDocument({ id, file, name, extension, bytes }) {
       bytes,
       pageCount: count,
       pageLabel: "page",
+      imageSupport: true,
       text: async (page) => (pages[page - 1] ?? "").trim(),
       notes: async () => "",
       images: async (page) => [await renderPdfPage(file, page)],
     };
   }
 
-  throw new Error(`unsupported document type ${JSON.stringify(extension)}; this proxy reads .pdf, .pptx and .docx`);
+  throw new Error(
+    `unsupported document type ${JSON.stringify(extension)}; this proxy reads .pdf, .pptx, .docx, .xlsx and text files`,
+  );
 }
 
 async function readFileBytes(file) {
