@@ -197,3 +197,24 @@ test("speaker notes are not part of the page text unless asked for", async () =>
   );
   assert.match(withNotes[0].text, /speaker notes \(not on the slide\)/);
 });
+
+test("a .docx is read as text plus its embedded images", async () => {
+  const { parseDocx, wordText } = await import("../src/docs/docx.js");
+  const { writeZip: zip } = await import("../test-support/zip-build.js");
+  const { makePng: png } = await import("../test-support/png.js");
+
+  assert.equal(wordText(`<w:p><w:r><w:t>first</w:t></w:r></w:p><w:p><w:r><w:t>second</w:t></w:r><w:br/><w:r><w:t>third</w:t></w:r></w:p>`), "first\nsecond\nthird");
+
+  const deck = zip([
+    ["word/document.xml", `<w:p><w:r><w:t>quarterly revenue grew 32 percent</w:t></w:r></w:p>`],
+    [
+      "word/_rels/document.xml.rels",
+      `<Relationships><Relationship Id="rId1" Type="t/image" Target="media/pic.png"/></Relationships>`,
+    ],
+    ["word/media/pic.png", png(8, 8)],
+  ]);
+  const parsed = parseDocx(deck);
+  assert.match(parsed.text, /quarterly revenue grew 32 percent/);
+  assert.equal(parsed.images.length, 1);
+  assert.equal(parsed.images[0].mime, "image/png");
+});

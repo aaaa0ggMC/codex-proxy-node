@@ -43,7 +43,7 @@ export default {
   // document plus a short descriptor; anything else returns null so another plugin can try.
   async ingestFile({ filename, data }) {
     const extension = path.extname(filename ?? "").toLowerCase();
-    if (extension !== ".pdf" && extension !== ".pptx") return null;
+    if (extension !== ".pdf" && extension !== ".pptx" && extension !== ".docx") return null;
     if (typeof data !== "string" || data === "") {
       return `[attachment ${filename} has no inline data; only file_data is supported, so it was not read]`;
     }
@@ -53,7 +53,7 @@ export default {
   tools: [
     {
       name: "open",
-      description: "Open a local .pdf or .pptx file and get an outline of its pages.",
+      description: "Open a local .pdf, .pptx or .docx file and get its text, page by page.",
       parameters: {
         type: "object",
         properties: { path: { type: "string", description: "Absolute path to the file" } },
@@ -103,7 +103,7 @@ export default {
     },
     {
       name: "read_page",
-      description: "Read one page of an open document: its text, plus its images so you can look at it.",
+      description: "Read one page of an open document: its text, plus its images so you can look at it. .pdf and .pptx have images; .docx is a single section.",
       parameters: {
         type: "object",
         properties: {

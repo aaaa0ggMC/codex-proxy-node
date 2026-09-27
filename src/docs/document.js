@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { stableId } from "../util.js";
 import { shrinkImage } from "./image.js";
 import { pdfPageCount, pdfTextByPage, renderPdfPage } from "./pdf.js";
+import { parseDocx } from "./docx.js";
 import { parsePptx } from "./pptx.js";
 
 // A document exposes the same four things whether it came from a deck or a PDF: a page count, the
@@ -91,6 +92,22 @@ async function loadDocument({ id, file, name, extension, bytes }) {
     };
   }
 
+  if (extension === ".docx") {
+    const parsed = parseDocx(await readFileBytes(file));
+    return {
+      id,
+      name,
+      kind: "docx",
+      bytes,
+      // Word does not paginate in the file, so there is one section rather than invented pages.
+      pageCount: 1,
+      pageLabel: "section",
+      text: async () => parsed.text,
+      notes: async () => "",
+      images: async () => Promise.all(parsed.images.map((image) => shrinkImage(image.data, image.mime))),
+    };
+  }
+
   if (extension === ".pdf") {
     const count = await pdfPageCount(file);
     const pages = await pdfTextByPage(file);
@@ -107,7 +124,7 @@ async function loadDocument({ id, file, name, extension, bytes }) {
     };
   }
 
-  throw new Error(`unsupported document type ${JSON.stringify(extension)}; this proxy reads .pdf and .pptx`);
+  throw new Error(`unsupported document type ${JSON.stringify(extension)}; this proxy reads .pdf, .pptx and .docx`);
 }
 
 async function readFileBytes(file) {
