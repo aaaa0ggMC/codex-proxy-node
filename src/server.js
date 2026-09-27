@@ -405,7 +405,12 @@ export class Server {
             // Reported as thinking rather than as answer text: a client renders it, and the marker
             // lets the same proxy strip it back out of the replayed history (see notes.js).
             sendChunk(
-              [openAIChatDeltaChoice({ reasoning_content: note(`${stringValue(event.data, "name")} …`) }, null)],
+              [
+                openAIChatDeltaChoice(
+                  { reasoning_content: `<th>${note(`${stringValue(event.data, "name")} …`)}</th>` },
+                  null,
+                ),
+              ],
               null,
             );
             break;
