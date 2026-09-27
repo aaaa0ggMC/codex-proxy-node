@@ -393,24 +393,44 @@ export class Server {
 
     sendChunk([openAIChatDeltaChoice({ role: "assistant", content: "" }, null)], null);
 
+    // Everything the client should fold away goes inside one <th>: the model's own thinking as
+    // <mth>, our progress notes as <ignore>. The block is opened lazily and closed as soon as
+    // real answer text starts, so the answer never ends up inside a thinking block.
+    let reasoningOpen = false;
+    const openReasoning = () => {
+      if (reasoningOpen) return;
+      reasoningOpen = true;
+      sendChunk([openAIChatDeltaChoice({ reasoning_content: "<th><mth>" }, null)], null);
+    };
+    const closeReasoning = () => {
+      if (!reasoningOpen) return;
+      reasoningOpen = false;
+      sendChunk([openAIChatDeltaChoice({ reasoning_content: "</mth></th>" }, null)], null);
+    };
+
     try {
       while (!step.done) {
         const event = step.value;
         if (res.writableEnded || res.destroyed) return;
         switch (event.type) {
           case "response.output_text.delta":
+            closeReasoning();
             sendChunk([openAIChatDeltaChoice({ content: stringValue(event.data, "delta") }, null)], null);
+            break;
+          case "response.reasoning_summary_text.delta":
+          case "response.reasoning_text.delta":
+            openReasoning();
+            sendChunk(
+              [openAIChatDeltaChoice({ reasoning_content: stringValue(event.data, "delta") }, null)],
+              null,
+            );
             break;
           case "codex_proxy.tool_start":
             // Reported as thinking rather than as answer text: a client renders it, and the marker
             // lets the same proxy strip it back out of the replayed history (see notes.js).
+            openReasoning();
             sendChunk(
-              [
-                openAIChatDeltaChoice(
-                  { reasoning_content: `<th>${note(`${stringValue(event.data, "name")} …`)}</th>` },
-                  null,
-                ),
-              ],
+              [openAIChatDeltaChoice({ reasoning_content: note(`${stringValue(event.data, "name")} …`) }, null)],
               null,
             );
             break;
@@ -455,6 +475,7 @@ export class Server {
       stopKeepalive();
     }
 
+    closeReasoning();
     sendChunk([openAIChatDeltaChoice({}, finishReason)], null);
     if (sendUsage) sendChunk([], chatUsageFromResponsesUsage(usage));
     writeSSEDone(res);

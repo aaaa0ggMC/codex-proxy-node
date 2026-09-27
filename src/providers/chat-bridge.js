@@ -187,6 +187,14 @@ export async function* chatStreamToResponses(events, { id, model }) {
       text += delta.content;
       yield { type: "response.output_text.delta", data: { type: "response.output_text.delta", delta: delta.content } };
     }
+    // Reasoning-capable chat models (DeepSeek and friends) put their thinking in reasoning_content.
+    // It is carried as a reasoning event so the transport can decide how to present it.
+    if (typeof delta.reasoning_content === "string" && delta.reasoning_content !== "") {
+      yield {
+        type: "response.reasoning_summary_text.delta",
+        data: { type: "response.reasoning_summary_text.delta", delta: delta.reasoning_content },
+      };
+    }
     for (const call of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
       const index = typeof call.index === "number" ? call.index : 0;
       const entry = toolCalls.get(index) ?? { id: "", name: "", arguments: "" };

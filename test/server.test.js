@@ -469,3 +469,43 @@ test("a slow local tool keeps the stream alive and can report progress", async (
     await upstream.close();
   }
 });
+
+test("model reasoning and progress share one folded <th> block", async () => {
+  const provider = {
+    async *events() {
+      yield { type: "response.reasoning_summary_text.delta", data: { delta: "weighing options. " } };
+      yield { type: "codex_proxy.tool_start", data: { name: "docs__open" } };
+      yield { type: "response.reasoning_summary_text.delta", data: { delta: "now reading." } };
+      yield { type: "response.output_text.delta", data: { delta: "the answer" } };
+      yield { type: "response.completed", data: { response: { id: "r", status: "completed" } } };
+    },
+    async models() {
+      return [];
+    },
+    async usage() {
+      return null;
+    },
+  };
+  const proxy = await startHttpServer(new Server({ provider, log: silentLog, usageTTL: 60 }).handler());
+
+  try {
+    const text = await (await chat(proxy.base, {
+      model: "m",
+      stream: true,
+      messages: [{ role: "user", content: "read it" }],
+    })).text();
+
+    const deltas = text
+      .split("\n")
+      .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+      .map((line) => JSON.parse(line.slice(6)))
+      .map((chunk) => chunk.choices?.[0]?.delta ?? {});
+
+    const reasoning = deltas.map((d) => d.reasoning_content ?? "").join("");
+    assert.equal(reasoning, "<th><mth>weighing options. <ignore>docs__open …</ignore>now reading.</mth></th>");
+    assert.equal(deltas.map((d) => d.content ?? "").join(""), "the answer");
+    assert.ok(!/answer/.test(reasoning), "the answer must not leak into the thinking block");
+  } finally {
+    await proxy.close();
+  }
+});
