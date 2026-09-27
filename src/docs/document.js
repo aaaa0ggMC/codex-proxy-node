@@ -78,7 +78,10 @@ async function loadDocument({ id, file, name, extension, bytes }) {
       bytes,
       pageCount: deck.slides.length,
       pageLabel: "slide",
-      text: async (page) => withNotes(deck.slides[page - 1]),
+      // Slide body only. Speaker notes are a separate field on purpose: mixing them into the
+      // page text made a deck read like a transcript of the presenter view.
+      text: async (page) => (deck.slides[page - 1]?.text ?? "").trim(),
+      notes: async (page) => (deck.slides[page - 1]?.notes ?? "").trim(),
       images: async (page) => {
         const slide = deck.slides[page - 1];
         const out = [];
@@ -99,17 +102,12 @@ async function loadDocument({ id, file, name, extension, bytes }) {
       pageCount: count,
       pageLabel: "page",
       text: async (page) => (pages[page - 1] ?? "").trim(),
+      notes: async () => "",
       images: async (page) => [await renderPdfPage(file, page)],
     };
   }
 
   throw new Error(`unsupported document type ${JSON.stringify(extension)}; this proxy reads .pdf and .pptx`);
-}
-
-function withNotes(slide) {
-  const text = slide?.text ?? "";
-  if (slide?.notes) return `${text}\n\n[notes] ${slide.notes}`;
-  return text;
 }
 
 async function readFileBytes(file) {

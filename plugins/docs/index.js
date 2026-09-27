@@ -110,21 +110,27 @@ export default {
           doc: { type: "string", description: "Document id from docs__open" },
           page: { type: "number", description: "1-based page or slide number" },
           images: { type: "boolean", description: "Set false to skip images and save tokens" },
+          notes: { type: "boolean", description: "Include the slide speaker notes. Off by default, because notes are not what is on the page." },
         },
         required: ["doc", "page"],
       },
       timeoutMs: 120_000,
-      async run({ doc, page, images }) {
+      async run({ doc, page, images, notes }) {
         const document = resolve(doc);
         const number = Number(page);
         if (!Number.isInteger(number) || number < 1 || number > document.pageCount) {
           throw new Error(`page must be an integer between 1 and ${document.pageCount}`);
         }
         const text = (await document.text(number)).trim();
+        let body = text || "(no text on this page)";
+        if (notes === true) {
+          const speaker = (await document.notes(number)).trim();
+          if (speaker !== "") body += `\n\n--- speaker notes (not on the slide) ---\n${speaker}`;
+        }
         const parts = [
           {
             type: "input_text",
-            text: `${document.name} ${document.pageLabel} ${number}/${document.pageCount}\n\n${text || "(no text on this page)"}`,
+            text: `${document.name} ${document.pageLabel} ${number}/${document.pageCount}\n\n${body}`,
           },
         ];
         if (images === false) return parts;

@@ -46,6 +46,11 @@ async function fixtureDeck() {
         `<Relationships><Relationship Id="rId1" Type="t/slide" Target="slides/slide1.xml"/><Relationship Id="rId2" Type="t/slide" Target="slides/slide2.xml"/></Relationships>`,
       ],
       ["ppt/slides/slide1.xml", `<a:p><a:r><a:t>Intro to widgets</a:t></a:r></a:p>`],
+      [
+        "ppt/slides/_rels/slide1.xml.rels",
+        `<Relationships><Relationship Id="rId9" Type="t/notesSlide" Target="../notesSlides/notesSlide1.xml"/></Relationships>`,
+      ],
+      ["ppt/notesSlides/notesSlide1.xml", `<a:p><a:r><a:t>remember to demo the widget</a:t></a:r></a:p>`],
       ["ppt/slides/slide2.xml", `<a:p><a:r><a:t>Widget revenue grew 32 percent</a:t></a:r></a:p>`],
       [
         "ppt/slides/_rels/slide2.xml.rels",
@@ -175,4 +180,20 @@ test("a chat file part is replaced by a descriptor before translation", async ()
   } finally {
     await proxy.close();
   }
+});
+
+test("speaker notes are not part of the page text unless asked for", async () => {
+  const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
+  const file = await fixtureDeck();
+  const opened = await registry.call("docs__open", JSON.stringify({ path: file }));
+  const docId = opened.split("\n")[0].split(" ")[1];
+
+  const plain = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 1, images: false }));
+  assert.equal(plain[0].text.includes("speaker notes"), false);
+
+  const withNotes = await registry.call(
+    "docs__read_page",
+    JSON.stringify({ doc: docId, page: 1, images: false, notes: true }),
+  );
+  assert.match(withNotes[0].text, /speaker notes \(not on the slide\)/);
 });

@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 // Read-only file search, deliberately without a listing tool.
@@ -77,6 +77,22 @@ function human(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
+
+// A read tool must not become a way out of the configured roots, so every path is resolved and
+// checked against them before anything is opened.
+function withinRoots(target) {
+  const resolved = path.resolve(target);
+  return ROOTS.some((root) => {
+    const base = path.resolve(root);
+    return resolved === base || resolved.startsWith(base + path.sep);
+  });
+}
+
+const TEXT_EXTENSIONS = [".md", ".markdown", ".txt", ".json", ".jsonl", ".csv", ".tsv", ".log", ".srt", ".yaml", ".yml", ".toml", ".ini", ".xml", ".html", ".css", ".js", ".mjs", ".ts", ".py", ".sh", ".go", ".rs", ".java", ".c", ".h", ".cpp"];
+const MAX_READ_BYTES = 2 * 1024 * 1024;
+const DEFAULT_LINES = 400;
+const MAX_LINES = 2000;
+
 export default {
   name: "filesearch",
   namespace: true,
@@ -84,7 +100,7 @@ export default {
     {
       name: "search",
       description:
-        "Find files by fuzzy name or partial path. Read-only and restricted to the configured folders; there is no way to list a directory. The returned path can be passed to docs__open.",
+        "Find files by fuzzy name or partial path. Read-only, restricted to the configured folders, and there is no way to list a directory. A hit can be opened: use filesearch__read for text files and docs__open for .pdf and .pptx. It cannot read file contents by itself.",
       parameters: {
         type: "object",
         properties: {
@@ -112,6 +128,48 @@ export default {
           lines.push(`${hit.file}  (${size})`);
         }
         return lines.join("\n");
+      },
+    },
+    {
+      name: "read",
+      description:
+        "Read a text file by path, one window of lines at a time. Read-only and restricted to the configured folders. Use this for .md, .txt, .json, .csv, .log, .srt and source code. It cannot read .pdf or .pptx — use docs__open for those.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Absolute path, as returned by filesearch__search" },
+          from_line: { type: "number", description: "1-based first line, default 1" },
+          lines: { type: "number", description: "How many lines, default 400" },
+        },
+        required: ["path"],
+      },
+      timeoutMs: 30_000,
+      async run({ path: target, from_line, lines }) {
+        if (typeof target !== "string" || target.trim() === "") throw new Error("path is required");
+        if (!withinRoots(target)) {
+          throw new Error(`refusing to read outside ${ROOTS.join(", ")}`);
+        }
+        const extension = path.extname(target).toLowerCase();
+        if (!TEXT_EXTENSIONS.includes(extension)) {
+          throw new Error(
+            `filesearch__read cannot read ${extension || "a file without an extension"}; it handles text. For .pdf and .pptx use docs__open.`,
+          );
+        }
+        const info = await stat(target).catch(() => null);
+        if (info == null || !info.isFile()) throw new Error(`no such file: ${target}`);
+        if (info.size > MAX_READ_BYTES) {
+          throw new Error(`file is ${human(info.size)}, larger than the ${human(MAX_READ_BYTES)} limit`);
+        }
+
+        const body = await readFile(target, "utf8");
+        if (body.includes("\u0000")) throw new Error("this looks like a binary file, not text");
+        const all = body.split("\n");
+        const start = Number.isInteger(Number(from_line)) && Number(from_line) > 0 ? Number(from_line) : 1;
+        const count = Number.isInteger(Number(lines)) && Number(lines) > 0 ? Math.min(Number(lines), MAX_LINES) : DEFAULT_LINES;
+        const window = all.slice(start - 1, start - 1 + count);
+        const shownTo = start - 1 + window.length;
+        const more = shownTo < all.length ? ` (${all.length - shownTo} more lines; call again with from_line=${shownTo + 1})` : "";
+        return `${target} — lines ${start}-${shownTo} of ${all.length}${more}\n\n${window.join("\n")}`;
       },
     },
   ],

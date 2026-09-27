@@ -28,12 +28,13 @@ test("a partial name matches, and unrelated files do not", async () => {
   assert.match(await search.run({ query: "nonexistent-xyz" }), /No file under/);
 });
 
-test("the plugin exposes search and nothing that lists or writes", () => {
-  assert.deepEqual(plugin.tools.map((tool) => tool.name), ["search"]);
+test("the plugin only exposes reading, never listing or writing", () => {
+  assert.deepEqual(plugin.tools.map((tool) => tool.name).sort(), ["read", "search"]);
   assert.equal(plugin.namespace, true);
-  const text = JSON.stringify(plugin.tools.map((tool) => tool.name + tool.description).join(" ")).toLowerCase();
-  for (const forbidden of ["list", "ls", "write", "delete", "remove", "move"]) {
-    assert.ok(!new RegExp(`\\\\b${forbidden}\\\\b`).test(text), `tool surface must not mention ${forbidden}`);
+  for (const tool of plugin.tools) {
+    for (const forbidden of ["list", "ls", "write", "delete", "remove", "move", "mkdir", "exec"]) {
+      assert.ok(!tool.name.toLowerCase().includes(forbidden), `${tool.name} must not be a ${forbidden} tool`);
+    }
   }
 });
 
