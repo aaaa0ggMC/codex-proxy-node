@@ -1,5 +1,4 @@
 import { boolValue, defaultedString, randomHex, stringValue } from "./util.js";
-import { readStreamEvents } from "./sse.js";
 import {
   newOpenAIResponse,
   openAIOutputItem,
@@ -156,13 +155,14 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false } = {}) {
   return { request: out, stream: boolValue(raw, "stream") };
 }
 
-// aggregateResponsesStream folds a streaming Responses answer into a single response object,
-// which is what a non-streaming client asked for.
-export async function aggregateResponsesStream(body, upstream) {
+// aggregateResponsesStream folds a stream of Responses events into a single response object,
+// which is what a non-streaming client asked for. It takes an event iterable rather than a body
+// so the agent loop can sit between the provider and the aggregation.
+export async function aggregateResponsesStream(events, upstream) {
   const agg = newOpenAIResponse(upstream);
   agg.outputText = "";
 
-  for await (const event of readStreamEvents(body)) {
+  for await (const event of events) {
     switch (event.type) {
       case "response.output_text.delta":
         agg.outputText += stringValue(event.data, "delta");

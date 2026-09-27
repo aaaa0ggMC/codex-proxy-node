@@ -16,16 +16,18 @@ import {
 } from "./schema.js";
 import { readStreamEvents, setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
 import { usageReport, usageText, usageValue } from "./usage.js";
+import { runAgent } from "./agent/loop.js";
 
 export class Server {
   #usageLock = Promise.resolve();
 
-  constructor({ codex, log, apiKey = "", webSearch = false, usageTTL = null }) {
+  constructor({ codex, log, apiKey = "", webSearch = false, usageTTL = null, registry = null }) {
     this.codex = codex;
     this.log = log;
     this.apiKey = apiKey;
     this.webSearch = webSearch;
     this.usageTTL = usageTTL;
+    this.registry = registry;
     this.usageCache = null;
     this.usageCacheAt = 0;
   }
@@ -264,9 +266,39 @@ export class Server {
   }
 
   async #aggregate(req, res, request) {
-    const resp = await this.codex.streamResponses(request, this.#signal(res));
-    if (!resp.ok) throw await upstreamError(resp);
-    return aggregateResponsesStream(resp.body, request);
+    const signal = this.#signal(res);
+    const events = runAgent({
+      stream: (payload, sig) => this.#upstreamEvents(payload, sig),
+      request,
+      registry: this.registry,
+      signal,
+    });
+    return aggregateResponsesStream(events, request);
+  }
+
+  // upstreamEvents returns the provider's Responses events, turning a non-2xx response into an
+  // error that still carries the upstream status so the handler can mirror it.
+  async #upstreamEvents(request, signal) {
+    const resp = await this.codex.streamResponses(request, signal);
+    if (!resp.ok) {
+      const err = await upstreamError(resp);
+      err.status = resp.status;
+      throw err;
+    }
+    return readStreamEvents(resp.body);
+  }
+
+  #agent(req, res, request) {
+    const signal = this.#signal(res);
+    return {
+      signal,
+      agent: runAgent({
+        stream: (payload, sig) => this.#upstreamEvents(payload, sig),
+        request,
+        registry: this.registry,
+        signal,
+      }),
+    };
   }
 
   async #streamResponses(req, res, request) {
@@ -298,15 +330,15 @@ export class Server {
   }
 
   async #streamChatCompletions(req, res, request, model, sendUsage) {
-    let resp;
+    const { agent } = this.#agent(req, res, request);
+
+    // Pull the first event before writing anything, so an upstream refusal is still a plain HTTP
+    // error instead of a half-written SSE stream.
+    let step;
     try {
-      resp = await this.codex.streamResponses(request, this.#signal(res));
+      step = await agent.next();
     } catch (err) {
-      writeOpenAIError(res, 502, err.message);
-      return;
-    }
-    if (!resp.ok) {
-      writeOpenAIError(res, resp.status, (await upstreamError(resp)).message);
+      writeOpenAIError(res, err.status ?? 502, err.message);
       return;
     }
 
@@ -327,7 +359,8 @@ export class Server {
     sendChunk([openAIChatDeltaChoice({ role: "assistant", content: "" }, null)], null);
 
     try {
-      for await (const event of readStreamEvents(resp.body)) {
+      while (!step.done) {
+        const event = step.value;
         if (res.writableEnded || res.destroyed) return;
         switch (event.type) {
           case "response.output_text.delta":
@@ -365,6 +398,7 @@ export class Server {
           default:
             break;
         }
+        step = await agent.next();
       }
     } catch {
       res.end();
