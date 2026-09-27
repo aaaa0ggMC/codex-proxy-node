@@ -1,5 +1,5 @@
 import path from "node:path";
-import { openDocument, openDocumentFromBuffer, outlineOf, searchPages } from "../../src/docs/document.js";
+import { documentId, openDocument, openDocumentFromBuffer, outlineOf, searchPages } from "../../src/docs/document.js";
 
 // Documents the model can actually work with: text to search, pages to look at. Tools are the
 // whole interface — nothing is injected into the prompt up front, so the context only grows when
@@ -7,6 +7,10 @@ import { openDocument, openDocumentFromBuffer, outlineOf, searchPages } from "..
 
 const opened = new Map();
 const MAX_OPEN = 8;
+// A client that compacts its history loses the document id, so the model re-searches and re-opens.
+// Document ids are content-derived, so the second open is the same document: remembering the
+// descriptor turns that repeat into a map lookup instead of a re-parse of a multi-megabyte file.
+const descriptors = new Map();
 
 function resolve(reference) {
   const key = String(reference ?? "").trim();
@@ -30,10 +34,25 @@ function resolve(reference) {
   );
 }
 
-function remember(document) {
-  if (opened.size >= MAX_OPEN) opened.delete(opened.keys().next().value);
+function remember(document, descriptor = "") {
+  if (opened.size >= MAX_OPEN) {
+    const evicted = opened.keys().next().value;
+    opened.delete(evicted);
+    descriptors.delete(evicted);
+  }
   opened.set(document.id, document);
+  if (descriptor !== "") descriptors.set(document.id, descriptor);
   return document;
+}
+
+// The page tools accept a path as well as an id, so recovering from a lost id is one call rather
+// than search-then-open-then-read.
+async function resolveOrOpen(reference) {
+  const key = String(reference ?? "").trim();
+  if (!key.startsWith("/")) return resolve(key);
+  const id = await documentId(key);
+  if (opened.has(id)) return opened.get(id);
+  return remember(await openDocument(key));
 }
 
 export default {
@@ -59,7 +78,7 @@ export default {
   tools: [
     {
       name: "open",
-      description: "Open a local document and get its text. Reads .pdf, .pptx, .docx, .xlsx, images, and text files such as .md, .txt, .csv and source code.",
+      description: "Open a local document and get its text. Reads .pdf, .pptx, .docx, .xlsx, images, and text files such as .md, .txt, .csv and source code. Opening the same file twice returns the same document id, so it is safe to repeat after a context reset; the page tools also accept a path directly.",
       parameters: {
         type: "object",
         properties: { path: { type: "string", description: "Absolute path to the file" } },
@@ -68,8 +87,13 @@ export default {
       timeoutMs: 120_000,
       async run({ path }) {
         if (typeof path !== "string" || path.trim() === "") throw new Error("path is required");
+        const id = await documentId(path);
+        const cached = descriptors.get(id);
+        if (cached != null) return cached;
         const document = remember(await openDocument(path));
-        return `doc ${document.id}\n${await outlineOf(document)}`;
+        const descriptor = `doc ${document.id}\n${await outlineOf(document)}`;
+        descriptors.set(document.id, descriptor);
+        return descriptor;
       },
     },
     {
@@ -97,7 +121,7 @@ export default {
       },
       timeoutMs: 120_000,
       async run({ doc, query, limit }) {
-        const document = resolve(doc);
+        const document = await resolveOrOpen(doc);
         const pages = [];
         for (let page = 1; page <= document.pageCount; page++) pages.push(await document.text(page));
         const hits = searchPages(pages, String(query ?? ""), Number(limit) > 0 ? Number(limit) : 8);
@@ -122,7 +146,7 @@ export default {
       },
       timeoutMs: 120_000,
       async run({ doc, page, images, notes }) {
-        const document = resolve(doc);
+        const document = await resolveOrOpen(doc);
         const number = Number(page);
         if (!Number.isInteger(number) || number < 1 || number > document.pageCount) {
           throw new Error(`page must be an integer between 1 and ${document.pageCount}`);

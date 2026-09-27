@@ -218,3 +218,16 @@ test("a .docx is read as text plus its embedded images", async () => {
   assert.equal(parsed.images.length, 1);
   assert.equal(parsed.images[0].mime, "image/png");
 });
+
+test("a lost document id is recoverable in one call, and reopening is cached", async () => {
+  const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
+  const file = await fixtureDeck();
+
+  const first = await registry.call("docs__open", JSON.stringify({ path: file }));
+  const second = await registry.call("docs__open", JSON.stringify({ path: file }));
+  assert.equal(first, second, "the same file must produce the same descriptor");
+
+  // What a client with a compacted history has left: the path, not the id.
+  const page = await registry.call("docs__read_page", JSON.stringify({ doc: file, page: 1, images: false }));
+  assert.match(page[0].text, /Intro to widgets/);
+});
