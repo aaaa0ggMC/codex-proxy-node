@@ -75,19 +75,33 @@ test("a disable_module switch is honoured once and never reaches the model", asy
   const messages = [
     { role: "system", content: "be terse" },
     { role: "user", content: [{ type: "text", text: "look at the deck\n<disable_module>docs</disable_module>" }] },
-    { role: "assistant", content: "ok <disable_module name=\"other\" />" },
+    { role: "assistant", content: 'ok <disable_module name="other" />' },
   ];
 
-  const disabled = applyModuleSwitches(messages);
+  const disabled = applyModuleSwitches(messages, ["docs", "other"]);
   assert.deepEqual([...disabled], ["docs"], "only the first user message carries the switch");
-  assert.ok(!messages[1].content[0].text.includes("disable_module"), "the tag is removed");
   assert.equal(messages[1].content[0].text, "look at the deck");
+  assert.ok(!messages[2].content.includes("disable_module"), "the tag is stripped everywhere");
 });
 
-test("both switch spellings are understood", async () => {
-  const { extractModuleSwitches } = await import("../src/modules.js");
-  assert.deepEqual(extractModuleSwitches(`<disable_module name="docs" />`).modules, ["docs"]);
-  assert.deepEqual(extractModuleSwitches(`<disable_module>stepfun</disable_module>`).modules, ["stepfun"]);
-  assert.deepEqual(extractModuleSwitches(`<disable_module docs />`).modules, ["docs"]);
+test("the spellings and the all/except form are understood", async () => {
+  const { extractModuleSwitches, applyModuleSwitches } = await import("../src/modules.js");
+
+  assert.deepEqual(extractModuleSwitches('<disable_module name="docs" />').switches, [{ verb: "disable", name: "docs" }]);
+  assert.deepEqual(extractModuleSwitches("<disable_module>stepfun</disable_module>").switches, [
+    { verb: "disable", name: "stepfun" },
+  ]);
+  assert.deepEqual(extractModuleSwitches("<disable_module docs />").switches, [{ verb: "disable", name: "docs" }]);
   assert.equal(extractModuleSwitches("nothing here").text, "nothing here");
+
+  const messages = [
+    {
+      role: "user",
+      content:
+        "<disable_modules>all</disable_modules><enable_modules>docs</enable_modules> please read it",
+    },
+  ];
+  const disabled = applyModuleSwitches(messages, ["docs", "other", "stepfun"]);
+  assert.deepEqual([...disabled].sort(), ["other", "stepfun"], "all, except docs");
+  assert.equal(messages[0].content, "please read it");
 });

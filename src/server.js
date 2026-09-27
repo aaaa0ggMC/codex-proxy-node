@@ -287,7 +287,7 @@ export class Server {
 
     // <disable_module> in the first user message turns a module off for this conversation. The tag
     // is stripped either way, so the upstream model never sees the control syntax.
-    const disabledPlugins = applyModuleSwitches(raw.messages);
+    const disabledPlugins = applyModuleSwitches(raw.messages, this.registry?.pluginNames() ?? []);
     if (disabledPlugins.size > 0) {
       this.log.info("modules disabled by switch", { modules: [...disabledPlugins] });
     }
