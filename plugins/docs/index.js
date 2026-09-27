@@ -14,12 +14,20 @@ function resolve(reference) {
   if (key === "") throw new Error("a document reference is required; call docs__open first");
   // Accept the id, a unique id prefix, or the file name, so a model that lost the id can still
   // refer to "the deck I just opened".
+  // Models routinely drop the "doc_" prefix and quote only the hash, so match either part.
+  const bare = (document) => document.id.replace(/^doc_/, "");
   const matches = [...opened.values()].filter(
-    (document) => document.id.startsWith(key) || document.name === key,
+    (document) => document.id.startsWith(key) || bare(document).startsWith(key) || document.name === key,
   );
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) throw new Error(`document reference ${JSON.stringify(key)} is ambiguous; use the doc id`);
-  throw new Error(`no open document matches ${JSON.stringify(key)}; call docs__open first`);
+  // Listing what is open turns a dead end into something the model can recover from.
+  const available = [...opened.values()].map((d) => `${d.id} (${d.name})`).join(", ");
+  throw new Error(
+    available === ""
+      ? `no document is open; call docs__open first`
+      : `no open document matches ${JSON.stringify(key)}; open documents: ${available}`,
+  );
 }
 
 function remember(document) {

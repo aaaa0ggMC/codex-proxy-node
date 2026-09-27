@@ -83,6 +83,11 @@ test("the docs plugin opens, searches and reads pages as text plus images", asyn
 
   const textOnly = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 2, images: false }));
   assert.equal(textOnly.length, 1);
+
+  // A model that quotes only the hash (no "doc_" prefix) must still resolve.
+  const hashOnly = docId.replace(/^doc_/, "");
+  const viaHash = await registry.call("docs__read_page", JSON.stringify({ doc: hashOnly, page: 1 }));
+  assert.match(viaHash[0].text, /Intro to widgets/);
 });
 
 test("the docs plugin rejects a page outside the document", async () => {
@@ -94,7 +99,10 @@ test("the docs plugin rejects a page outside the document", async () => {
     registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 9 })),
     /page must be an integer between 1 and 2/,
   );
-  await assert.rejects(registry.call("docs__search", JSON.stringify({ doc: "nope.pptx", query: "x" })), /no open document/);
+  await assert.rejects(
+    registry.call("docs__search", JSON.stringify({ doc: "nope.pptx", query: "x" })),
+    /no open document matches .*; open documents: /,
+  );
 });
 
 test("an inline attachment becomes an open document with a content-derived id", async () => {
