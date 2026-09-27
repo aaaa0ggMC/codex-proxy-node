@@ -85,7 +85,8 @@ export async function* runAgent({
   request,
   registry,
   signal,
-  maxTurns = 4,
+  // A long document walk is many turns; this is only a guard against a runaway loop.
+  maxTurns = 256,
   log = null,
   discardImages = 0,
   disabledPlugins = [],
@@ -161,7 +162,12 @@ export async function* runAgent({
       // progress or stays internal; either way the caller knows the gap is not a stall.
       yield {
         type: "codex_proxy.tool_start",
-        data: { type: "codex_proxy.tool_start", name: stringValue(call, "name"), call_id: callId },
+        data: {
+          type: "codex_proxy.tool_start",
+          name: stringValue(call, "name"),
+          arguments: stringValue(call, "arguments"),
+          call_id: callId,
+        },
       };
       try {
         const output = await registry.call(stringValue(call, "name"), call.arguments, { signal });

@@ -25,7 +25,7 @@ const flagSpec = {
   "upstream-key": { type: "string", fallback: "", help: "bearer token for the openai provider; defaults to CODEX_PROXY_UPSTREAM_KEY" },
   "upstream-model": { type: "string", fallback: "", help: "force a model id for the openai provider instead of passing the client's through" },
   "reasoning-effort": { type: "string", fallback: "", help: "reasoning effort sent to the openai provider (low, medium, high)" },
-  "max-turns": { type: "int", fallback: 4, help: "maximum agent loop turns per request" },
+  "max-turns": { type: "int", fallback: 256, help: "maximum agent loop turns per request; a runaway guard, not a working limit" },
   "discard-images": { type: "int", fallback: 0, help: "keep images from only the last N tool results (0 keeps all)" },
   config: { type: "string", fallback: "", help: "config.json describing several providers; defaults to CODEX_PROXY_CONFIG" },
 };

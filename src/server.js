@@ -33,7 +33,7 @@ export class Server {
     webSearch = false,
     usageTTL = null,
     registry = null,
-    maxTurns = 4,
+    maxTurns = 256,
     discardImages = 0,
     progress = false,
     keepaliveMs = 15_000,
@@ -586,7 +586,16 @@ export class Server {
             // lets the same proxy strip it back out of the replayed history (see notes.js).
             openReasoning();
             sendChunk(
-              [openAIChatDeltaChoice({ reasoning_content: note(`${stringValue(event.data, "name")} …`) }, null)],
+              [
+                openAIChatDeltaChoice(
+                  {
+                    reasoning_content: note(
+                      `${stringValue(event.data, "name")}${summarizeArguments(event.data.arguments)}`,
+                    ),
+                  },
+                  null,
+                ),
+              ],
               null,
             );
             break;
@@ -654,6 +663,30 @@ export class Server {
     writeSSEDone(res);
     res.end();
   }
+}
+
+// The progress note shows what was asked with which arguments — a bare tool name says nothing about
+// what is happening. Kept short, because it lands in the client's thinking panel.
+function summarizeArguments(raw) {
+  const text = String(raw ?? "").trim();
+  if (text === "" || text === "{}") return "";
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const parts = Object.entries(parsed).map(([key, value]) => {
+        const shown = typeof value === "string" ? value : JSON.stringify(value);
+        return `${key}=${shown}`;
+      });
+      return clip(`(${parts.join(", ")})`);
+    }
+  } catch {
+    // fall through to the raw text
+  }
+  return clip(`(${text})`);
+}
+
+function clip(text, limit = 140) {
+  return text.length <= limit ? text : `${text.slice(0, limit)}…)`;
 }
 
 // A Responses reasoning item keeps its text either in content[].reasoning_text or in summary[].text.

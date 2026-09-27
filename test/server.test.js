@@ -474,7 +474,7 @@ test("model reasoning and progress share one folded <th> block", async () => {
   const provider = {
     async *events() {
       yield { type: "response.reasoning_summary_text.delta", data: { delta: "weighing options. " } };
-      yield { type: "codex_proxy.tool_start", data: { name: "docs__open" } };
+      yield { type: "codex_proxy.tool_start", data: { name: "docs__open", arguments: '{"path":"/tmp/a.pptx"}' } };
       yield { type: "response.reasoning_summary_text.delta", data: { delta: "now reading." } };
       yield { type: "response.output_text.delta", data: { delta: "the answer" } };
       yield { type: "response.completed", data: { response: { id: "r", status: "completed" } } };
@@ -502,7 +502,10 @@ test("model reasoning and progress share one folded <th> block", async () => {
       .map((chunk) => chunk.choices?.[0]?.delta ?? {});
 
     const reasoning = deltas.map((d) => d.reasoning_content ?? "").join("");
-    assert.equal(reasoning, "<th><mth>weighing options. <ignore>docs__open …</ignore>now reading.</mth></th>");
+    assert.equal(
+      reasoning,
+      '<th><mth>weighing options. <ignore>docs__open(path=/tmp/a.pptx)</ignore>now reading.</mth></th>',
+    );
     assert.equal(deltas.map((d) => d.content ?? "").join(""), "the answer");
     assert.ok(!/answer/.test(reasoning), "the answer must not leak into the thinking block");
   } finally {
