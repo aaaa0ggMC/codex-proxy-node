@@ -298,7 +298,17 @@ export class Server {
       if (!Array.isArray(message?.content)) continue;
       for (let index = 0; index < message.content.length; index++) {
         const part = message.content[index];
-        if (part == null || typeof part !== "object" || part.type !== "file") continue;
+        if (part == null || typeof part !== "object" || part.type !== "file") {
+          // Diagnostics for attachment shapes we do not recognise yet: names only, never values.
+          if (part != null && typeof part === "object" && part.type !== "text" && part.type !== "image_url") {
+            this.log.info("unhandled content part", {
+              part_type: part.type,
+              keys: Object.keys(part).join(","),
+              file_keys: part.file != null && typeof part.file === "object" ? Object.keys(part.file).join(",") : "",
+            });
+          }
+          continue;
+        }
         const file = part.file ?? part;
         const filename = file.filename ?? "attachment";
         const inline = typeof file.file_data === "string" ? file.file_data : "";
