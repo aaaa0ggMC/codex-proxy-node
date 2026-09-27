@@ -11,7 +11,7 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
-function crc32(buffer) {
+export function crc32(buffer) {
   let c = 0xffffffff;
   for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;

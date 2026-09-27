@@ -4,11 +4,9 @@ import { readFileSync } from "node:fs";
 import { readZip, resolveZipPath } from "../src/docs/zip.js";
 import { mimeForName, parsePptx, shapeText, unescapeXml } from "../src/docs/pptx.js";
 import { writeZip } from "../test-support/zip-build.js";
+import { makePng } from "../test-support/png.js";
 
-const tinyPng = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
-  "base64",
-);
+const tinyPng = makePng(8, 8);
 
 // A miniature deck whose slide order (2 then 1) differs from the numeric filenames, so the test
 // proves the order comes from presentation.xml rather than from sorting.
