@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+import dns from "node:dns";
+import http from "node:http";
+import { HelpRequested, parseFlags, usageText } from "./config.js";
+import { TokenSource } from "./auth.js";
+import { CodexClient } from "./codex.js";
+import { Server } from "./server.js";
+import { usageTTLFromEnv } from "./usage.js";
+import { createLoggerTo } from "./log.js";
+
+// Prefer IPv4 when resolving the upstream. Go's dialer does happy-eyeballs and falls back on its
+// own, but Node connects to the first address DNS hands back; on dual-stack and fake-IP (TUN)
+// networks that is often an unroutable AAAA record, which shows up as "fetch failed". Ordering
+// IPv4 first matches what the Go binary does in practice. Override with
+// NODE_OPTIONS=--dns-result-order=verbatim if your host really is IPv6-only.
+dns.setDefaultResultOrder("ipv4first");
+
+function main(argv) {
+  let cfg;
+  try {
+    cfg = parseFlags(argv);
+  } catch (err) {
+    if (err instanceof HelpRequested) {
+      process.stdout.write(usageText());
+      return;
+    }
+    process.stderr.write(`codex-proxy: ${err.message}\n`);
+    process.stderr.write(usageText());
+    process.exitCode = 1;
+    return;
+  }
+
+  const log = createLoggerTo(process.stderr);
+  const tokens = new TokenSource({ codexHome: cfg.codexHome });
+  const codex = new CodexClient({ tokens });
+  const server = new Server({
+    codex,
+    log,
+    apiKey: cfg.apiKey,
+    webSearch: cfg.webSearch,
+    usageTTL: usageTTLFromEnv(),
+  });
+
+  const httpServer = http.createServer(server.handler());
+  // Codex streams long answers, so no whole-request timeout (matching the Go server, which only
+  // bounds header reads).
+  httpServer.requestTimeout = 0;
+  httpServer.headersTimeout = 10_000;
+
+  httpServer.on("error", (err) => {
+    process.stderr.write(`codex-proxy: ${err.message}\n`);
+    process.exit(1);
+  });
+
+  httpServer.listen(cfg.port, cfg.host, () => {
+    process.stderr.write(`listening on http://${cfg.host}:${cfg.port}\n`);
+  });
+}
+
+main(process.argv.slice(2));

@@ -1,0 +1,19 @@
+{
+  "name": "codex-proxy",
+  "version": "1.0.0",
+  "description": "Local OpenAI-compatible proxy backed by your existing Codex CLI ChatGPT login",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "codex-proxy": "src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "private": true
+}
