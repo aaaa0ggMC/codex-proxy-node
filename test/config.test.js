@@ -16,6 +16,7 @@ test("parseFlags applies the documented defaults", () => {
     reasoningEffort: "",
     maxTurns: 4,
     discardImages: 0,
+    config: "",
   });
 });
 

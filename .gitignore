@@ -1,3 +1,6 @@
 node_modules/
 *.log
 .DS_Store
+# Local multi-provider config. It names providers and points at env vars, but it is still the
+# file a user is most likely to paste a key into, so it never gets committed.
+config.json

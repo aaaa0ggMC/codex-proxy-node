@@ -7,6 +7,7 @@ export const webSearchEnv = "CODEX_PROXY_WEB_SEARCH";
 
 const providerEnvs = {
   provider: "CODEX_PROXY_PROVIDER",
+  config: "CODEX_PROXY_CONFIG",
   upstream: "CODEX_PROXY_UPSTREAM",
   "upstream-key": "CODEX_PROXY_UPSTREAM_KEY",
   "upstream-model": "CODEX_PROXY_UPSTREAM_MODEL",
@@ -26,6 +27,7 @@ const flagSpec = {
   "reasoning-effort": { type: "string", fallback: "", help: "reasoning effort sent to the openai provider (low, medium, high)" },
   "max-turns": { type: "int", fallback: 4, help: "maximum agent loop turns per request" },
   "discard-images": { type: "int", fallback: 0, help: "keep images from only the last N tool results (0 keeps all)" },
+  config: { type: "string", fallback: "", help: "config.json describing several providers; defaults to CODEX_PROXY_CONFIG" },
 };
 
 export class HelpRequested extends Error {}
@@ -144,6 +146,7 @@ export function parseFlags(args, env = process.env) {
     reasoningEffort: cfg["reasoning-effort"],
     maxTurns: cfg["max-turns"],
     discardImages: cfg["discard-images"],
+    config: cfg.config,
   };
 }
 

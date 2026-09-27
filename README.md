@@ -245,6 +245,35 @@ That is why tool declarations are sorted, tool call ids are derived from content
 The agent loop's own turns are appended at the tail, so the shared prefix — the whole conversation
 history — still hits the cache; only the tokens after the last user turn are recomputed.
 
+## Multi-provider config
+
+For more than one upstream, describe them in `config.json` (see `config.example.json`) and the
+proxy becomes a small aggregation platform: `/v1/models` lists every enabled provider's models, and
+each request is routed by model id.
+
+```json
+{
+  "default_provider": "codex",
+  "providers": {
+    "codex":    { "type": "codex", "enabled": true },
+    "deepseek": { "type": "openai", "base_url": "https://api.deepseek.com/v1", "api_key_env": "DEEPSEEK_API_KEY" },
+    "stepfun":  { "type": "openai", "base_url": "https://api.stepfun.ai/step_plan/v1", "api_key_env": "STEPFUN_API_KEY", "model": "step-3.7-flash" },
+    "local":    { "type": "openai-responses", "base_url": "http://127.0.0.1:8080/v1", "models": ["my-model"] }
+  }
+}
+```
+
+Provider types are `codex` (ChatGPT Codex login), `openai` (Chat Completions, bridged) and
+`openai-responses` (an endpoint that already speaks the Responses API). `enabled: false` parks one
+without deleting it, and a provider that fails to list models is skipped with a warning rather than
+blanking the catalogue.
+
+Model ids are advertised both as `provider/model` and, when unambiguous across providers, as the
+bare id — so a client with `gpt-5.6-luna` saved in its history keeps resolving. Routing prefers the
+explicit `provider/model` form, then a unique bare id, then `default_provider`.
+
+`config.json` is git-ignored on purpose; keep keys in `api_key_env` so the file stays shareable.
+
 ## License
 
 MIT. See [LICENSE](LICENSE); the original copyright notices are preserved.

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import dns from "node:dns";
+import { existsSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { HelpRequested, parseFlags, usageText } from "./config.js";
 import { TokenSource } from "./auth.js";
 import { createProvider } from "./providers/index.js";
+import { ProviderRegistry, loadProviderConfig } from "./providers/registry.js";
 import { Server } from "./server.js";
 import { usageTTLFromEnv } from "./usage.js";
 import { createLoggerTo } from "./log.js";
@@ -34,7 +36,19 @@ async function main(argv) {
 
   const log = createLoggerTo(process.stderr);
   const tokens = new TokenSource({ codexHome: cfg.codexHome });
-  const provider = createProvider(cfg, { tokens });
+
+  // Either one provider from the CLI flags, or several from config.json. The registry presents
+  // both cases to the server as a single provider.
+  const configPath = cfg.config !== "" ? cfg.config : existsSync("config.json") ? "config.json" : "";
+  let provider;
+  if (configPath !== "") {
+    const loaded = await loadProviderConfig(configPath, { log, tokens });
+    if (loaded.providers.length === 0) throw new Error(`${configPath} did not enable any provider`);
+    provider = new ProviderRegistry({ ...loaded, log });
+    log.info("providers loaded", { config: configPath, providers: provider.names() });
+  } else {
+    provider = createProvider(cfg, { tokens });
+  }
 
   // Plugins are discovered once, at start. Reloading them mid-flight would change the tool
   // declarations and so invalidate every conversation's cached prompt prefix.
