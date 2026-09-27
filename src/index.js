@@ -50,6 +50,8 @@ async function main(argv) {
     webSearch: cfg.webSearch,
     usageTTL: usageTTLFromEnv(),
     registry,
+    maxTurns: cfg.maxTurns,
+    discardImages: cfg.discardImages,
   });
 
   const httpServer = http.createServer(server.handler());

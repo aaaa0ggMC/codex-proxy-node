@@ -14,6 +14,8 @@ test("parseFlags applies the documented defaults", () => {
     upstreamKey: "",
     upstreamModel: "",
     reasoningEffort: "",
+    maxTurns: 4,
+    discardImages: 0,
   });
 });
 

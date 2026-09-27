@@ -21,13 +21,15 @@ import { runAgent } from "./agent/loop.js";
 export class Server {
   #usageLock = Promise.resolve();
 
-  constructor({ provider, log, apiKey = "", webSearch = false, usageTTL = null, registry = null }) {
+  constructor({ provider, log, apiKey = "", webSearch = false, usageTTL = null, registry = null, maxTurns = 4, discardImages = 0 }) {
     this.provider = provider;
     this.log = log;
     this.apiKey = apiKey;
     this.webSearch = webSearch;
     this.usageTTL = usageTTL;
     this.registry = registry;
+    this.maxTurns = maxTurns;
+    this.discardImages = discardImages;
     this.usageCache = null;
     this.usageCacheAt = 0;
   }
@@ -266,13 +268,9 @@ export class Server {
   }
 
   async #aggregate(req, res, request) {
-    const signal = this.#signal(res);
-    const events = runAgent({
-      stream: (payload, sig) => this.#upstreamEvents(payload, sig),
-      request,
-      registry: this.registry,
-      signal,
-    });
+    // Go through #agent so the non-streaming path gets the same loop settings as the streaming one.
+    const { agent } = this.#agent(req, res, request);
+    const events = agent;
     return aggregateResponsesStream(events, request);
   }
 
@@ -291,6 +289,9 @@ export class Server {
         request,
         registry: this.registry,
         signal,
+        log: this.log,
+        maxTurns: this.maxTurns,
+        discardImages: this.discardImages,
       }),
     };
   }

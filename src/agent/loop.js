@@ -15,6 +15,53 @@ function callIdOf(call) {
   return id !== "" ? id : stringValue(call, "id");
 }
 
+// inputStats reports what a turn will carry, which is what the cache analysis needs: how much of
+// the prompt is images, and how many tool results are being replayed.
+export function inputStats(input) {
+  let images = 0;
+  let characters = 0;
+  let outputs = 0;
+  for (const item of input) {
+    if (item?.type === "function_call_output") {
+      outputs += 1;
+      if (Array.isArray(item.output)) {
+        for (const part of item.output) {
+          if (part.type === "input_image") images += 1;
+          else characters += String(part.text ?? "").length;
+        }
+      } else {
+        characters += String(item.output ?? "").length;
+      }
+    } else if (Array.isArray(item?.content)) {
+      for (const part of item.content) {
+        if (part.type === "input_image") images += 1;
+        else characters += String(part.text ?? "").length;
+      }
+    } else {
+      characters += String(item?.content ?? "").length;
+    }
+  }
+  return { items: input.length, images, characters, outputs };
+}
+
+// discardOldImages is the compaction policy under test: keep the images from the last `keep` tool
+// results and drop the rest. It shrinks the prompt, but it also rewrites the middle of the
+// conversation, which is exactly what a prefix cache cannot forgive.
+export function discardOldImages(input, keep) {
+  if (keep <= 0) return input;
+  const outputIndexes = [];
+  input.forEach((item, index) => {
+    if (item?.type === "function_call_output" && Array.isArray(item.output)) outputIndexes.push(index);
+  });
+  const drop = new Set(outputIndexes.slice(0, Math.max(0, outputIndexes.length - keep)));
+  if (drop.size === 0) return input;
+  return input.map((item, index) => {
+    if (!drop.has(index)) return item;
+    const output = item.output.filter((part) => part.type !== "input_image");
+    return { ...item, output: output.length > 0 ? output : "[images removed to save context]" };
+  });
+}
+
 // mergeTools appends the local tool declarations after the client's, skipping any name the client
 // already declared: a client-owned tool always wins, so a plugin can never hijack it.
 export function mergeTools(clientTools, localTools) {
@@ -29,7 +76,7 @@ export function mergeTools(clientTools, localTools) {
 
 // runAgent yields provider events for the caller to forward downstream. Local tool calls are
 // swallowed (the client must never see them), executed, and replayed back to the provider.
-export async function* runAgent({ stream, request, registry, signal, maxTurns = 4 }) {
+export async function* runAgent({ stream, request, registry, signal, maxTurns = 4, log = null, discardImages = 0 }) {
   const localTools = registry == null ? [] : registry.definitions();
   const localNames = new Set(localTools.map((tool) => tool.name));
   const tools = mergeTools(request.tools, localTools);
@@ -37,9 +84,17 @@ export async function* runAgent({ stream, request, registry, signal, maxTurns = 
 
   let input = request.input;
   for (let turn = 0; ; turn++) {
+    if (discardImages > 0) {
+      const compacted = discardOldImages(input, discardImages);
+      if (compacted !== input) log?.info("context compacted", { turn, ...inputStats(compacted) });
+      input = compacted;
+    }
     const calls = [];
     let handedBack = false;
     let finished = null;
+
+    const stats = inputStats(input);
+    log?.info("turn started", { turn, ...stats });
 
     // Resolve the stream first: an async provider wrapper returns a promise of an iterable, and
     // awaiting it here is what lets the handler see an upstream error as a plain throw.
@@ -48,6 +103,15 @@ export async function* runAgent({ stream, request, registry, signal, maxTurns = 
       if (event?.type === "response.completed") {
         // Hold the completion: whether the client should see it depends on what we do next.
         finished = event;
+        const usage = event.data?.response?.usage;
+        if (usage != null) {
+          log?.info("turn completed", {
+            turn,
+            prompt_tokens: usage.input_tokens,
+            cache_hit_tokens: usage.input_tokens_details?.cached_tokens,
+            output_tokens: usage.output_tokens,
+          });
+        }
         continue;
       }
       if (event?.type === "response.failed" || event?.type === "response.incomplete") {

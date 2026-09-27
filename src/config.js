@@ -24,6 +24,8 @@ const flagSpec = {
   "upstream-key": { type: "string", fallback: "", help: "bearer token for the openai provider; defaults to CODEX_PROXY_UPSTREAM_KEY" },
   "upstream-model": { type: "string", fallback: "", help: "force a model id for the openai provider instead of passing the client's through" },
   "reasoning-effort": { type: "string", fallback: "", help: "reasoning effort sent to the openai provider (low, medium, high)" },
+  "max-turns": { type: "int", fallback: 4, help: "maximum agent loop turns per request" },
+  "discard-images": { type: "int", fallback: 0, help: "keep images from only the last N tool results (0 keeps all)" },
 };
 
 export class HelpRequested extends Error {}
@@ -140,6 +142,8 @@ export function parseFlags(args, env = process.env) {
     upstreamKey: cfg["upstream-key"],
     upstreamModel: cfg["upstream-model"],
     reasoningEffort: cfg["reasoning-effort"],
+    maxTurns: cfg["max-turns"],
+    discardImages: cfg["discard-images"],
   };
 }
 
