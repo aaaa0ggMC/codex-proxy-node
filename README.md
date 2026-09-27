@@ -225,6 +225,25 @@ Tests live in `test/*.test.js`; `test-support/helpers.js` holds the shared test 
   but no longer force the web search tool on. Search is controlled entirely by
   `web_search_options`, `tools`, `tool_choice` or `--web-search`.
 - No dependencies: only the Node standard library.
+- **Providers**: `--provider codex` (default, ChatGPT Codex login) or `--provider openai` plus
+  `--upstream` for any OpenAI-compatible endpoint (DeepSeek, StepFun, a local server). The
+  `openai` provider bridges the canonical Responses format down to Chat Completions and back.
+- **Plugins**: drop a folder into `plugins/` and its tools are offered to the model. The proxy runs
+  them itself, including tools that return images. See [plugins/README.md](plugins/README.md).
+
+## The cache rule
+
+Everything the proxy puts into an upstream request must be a **pure function of the client
+request**: same history in, same bytes out. Providers cache by prompt prefix, so a random id, a
+timestamp, or a tool set that varies per request silently destroys the hit rate for the whole
+conversation.
+
+That is why tool declarations are sorted, tool call ids are derived from content (`stableId` in
+`src/util.js`), per-request context is appended at the tail rather than injected into
+`instructions`, history is never rewritten, and plugins reload only on restart.
+
+The agent loop's own turns are appended at the tail, so the shared prefix — the whole conversation
+history — still hits the cache; only the tokens after the last user turn are recomputed.
 
 ## License
 
