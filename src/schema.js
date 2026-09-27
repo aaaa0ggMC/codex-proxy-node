@@ -3,31 +3,33 @@ import { numberOrZero, randomHex, stringValue, defaultedString } from "./util.js
 // OpenAI-compatible response shapes live here so endpoint schemas are easy to audit.
 // Field sets are based on https://github.com/openai/openai-openapi.
 
-// openAIModelsResponse lists the models the account can actually use. Web search is a software
-// feature here (web_search_options / tools / --web-search), so the -search suffixes are plain
-// aliases of the base model rather than separate models. They are still listed because clients
-// such as Rikkahub remember a model id per conversation: dropping the id would blank out
-// existing history.
+// openAIModelsResponse lists the models an account can actually use. Web search is a software
+// feature here (web_search_options / tools / --web-search), so -search suffixes are plain aliases
+// of a base model rather than separate models.
+//
+// Only providers that ask for them get those aliases (Codex does, because clients such as
+// Rikkahub have ids like `<model>-search-preview` saved per conversation and dropping the id would
+// blank out existing history). Every other provider is listed once, under its real id.
 export function openAIModelsResponse(models) {
   const data = [];
+  let anyAliases = false;
   for (const model of models) {
     if (!model?.supported_in_api || model.visibility !== "list") continue;
-    for (const suffix of ["", "-search", "-search-preview"]) {
+    const aliases = model.search_aliases === true;
+    if (aliases) anyAliases = true;
+    for (const suffix of aliases ? ["", "-search", "-search-preview"] : [""]) {
       data.push({
         id: model.slug + suffix,
         object: "model",
         created: 0,
-        owned_by: "openai-codex",
+        owned_by: model.owned_by ?? "openai-codex",
       });
     }
   }
-  // Compatibility alias for clients that hardcode this id.
-  data.push({
-    id: "gpt-4o-search-preview",
-    object: "model",
-    created: 0,
-    owned_by: "openai-codex",
-  });
+  if (anyAliases) {
+    // Compatibility alias for clients that hardcode this id.
+    data.push({ id: "gpt-4o-search-preview", object: "model", created: 0, owned_by: "openai-codex" });
+  }
   return { object: "list", data };
 }
 

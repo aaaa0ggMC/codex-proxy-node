@@ -143,7 +143,13 @@ export class ProviderRegistry {
       for (const id of [`${provider}/${model.slug}`, ...(this.index.get(model.slug)?.length === 1 ? [model.slug] : [])]) {
         if (seen.has(id)) continue;
         seen.add(id);
-        out.push({ slug: id, supported_in_api: true, visibility: "list" });
+        out.push({
+          slug: id,
+          supported_in_api: true,
+          visibility: "list",
+          owned_by: provider,
+          search_aliases: model.search_aliases === true,
+        });
       }
     }
     return out;

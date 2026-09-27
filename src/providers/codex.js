@@ -15,7 +15,8 @@ export class CodexProvider {
   }
 
   async models(signal) {
-    return this.client.models(signal);
+    // Codex is the provider whose clients have -search ids saved, so it asks for the aliases.
+    return (await this.client.models(signal)).map((model) => ({ ...model, search_aliases: true }));
   }
 
   async *events(request, signal) {
