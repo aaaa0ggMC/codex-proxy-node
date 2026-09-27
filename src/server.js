@@ -296,6 +296,34 @@ export class Server {
   // replaced by a text descriptor, so the translator never sees a shape the provider cannot take.
   async #ingestAttachments(raw) {
     if (this.registry == null || !Array.isArray(raw.messages)) return;
+    // The shape of what arrived, sizes only: enough to see where a prompt's tokens come from
+    // without putting message content in the log.
+    this.log.info("chat request shape", {
+      messages: raw.messages.length,
+      shape: raw.messages
+        .map((message) => {
+          const role = stringValue(message, "role") || "?";
+          if (!Array.isArray(message?.content)) return `${role}:text(${String(message?.content ?? "").length})`;
+          return `${role}:[${message.content
+            .map((part) => {
+              const type = stringValue(part, "type") || "?";
+              const body = part?.file ?? part;
+              const size =
+                typeof body?.text === "string"
+                  ? body.text.length
+                  : typeof body?.file_data === "string"
+                    ? body.file_data.length
+                    : typeof part?.image_url === "string"
+                      ? part.image_url.length
+                      : part?.image_url?.url
+                        ? String(part.image_url.url).length
+                        : 0;
+              return `${type}(${size})`;
+            })
+            .join("+")}]`;
+        })
+        .join(" "),
+    });
     for (const message of raw.messages) {
       if (!Array.isArray(message?.content)) continue;
       for (let index = 0; index < message.content.length; index++) {

@@ -17,7 +17,9 @@ function callIdOf(call) {
 
 // inputStats reports what a turn will carry, which is what the cache analysis needs: how much of
 // the prompt is images, and how many tool results are being replayed.
-export function inputStats(input) {
+// instructions and the tool declarations are part of the prompt but are not items in `input`, so
+// they are counted separately: otherwise a huge system prompt looks like missing tokens.
+export function inputStats(input, request = null) {
   let images = 0;
   let characters = 0;
   let outputs = 0;
@@ -41,7 +43,9 @@ export function inputStats(input) {
       characters += String(item?.content ?? "").length;
     }
   }
-  return { items: input.length, images, characters, outputs };
+  const instructions = request == null ? 0 : String(request.instructions ?? "").length;
+  const tools = request == null || !Array.isArray(request.tools) ? 0 : JSON.stringify(request.tools).length;
+  return { items: input.length, images, characters, outputs, instructions, tools };
 }
 
 // discardOldImages is the compaction policy under test: keep the images from the last `keep` tool
@@ -93,7 +97,7 @@ export async function* runAgent({ stream, request, registry, signal, maxTurns = 
     let handedBack = false;
     let finished = null;
 
-    const stats = inputStats(input);
+    const stats = inputStats(input, base);
     log?.info("turn started", { turn, ...stats });
 
     // Resolve the stream first: an async provider wrapper returns a promise of an iterable, and
