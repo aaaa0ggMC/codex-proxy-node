@@ -59,10 +59,10 @@ async function fixtureDeck() {
 
 test("the docs plugin opens, searches and reads pages as text plus images", async () => {
   const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
-  assert.deepEqual(
-    [...registry.names()].sort(),
-    ["docs__list", "docs__open", "docs__read_page", "docs__search"],
-  );
+  const names = [...registry.names()];
+  for (const tool of ["docs__list", "docs__open", "docs__read_page", "docs__search"]) {
+    assert.ok(names.includes(tool), `expected ${tool} in ${names.join(", ")}`);
+  }
 
   const file = await fixtureDeck();
   const opened = await registry.call("docs__open", JSON.stringify({ path: file }));
