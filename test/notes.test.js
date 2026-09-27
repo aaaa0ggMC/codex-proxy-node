@@ -1,7 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildResponsesRequestFromChat } from "../src/compat.js";
-import { note, stripNotes } from "../src/notes.js";
+import { note, stripNotes, stripWrapper } from "../src/notes.js";
+
+test("stripWrapper leaves only the model's own thinking", () => {
+  assert.equal(
+    stripWrapper("<th><mth>real thinking</mth><ignore>docs__open …</ignore></th>"),
+    "real thinking",
+  );
+});
+
+test("replayed thinking goes back as a reasoning item", () => {
+  const { request } = buildResponsesRequestFromChat({
+    model: "deepseek-flash",
+    messages: [
+      { role: "user", content: "look at the deck" },
+      {
+        role: "assistant",
+        content: "here is the answer",
+        reasoning_content: "<th><mth>weighing options</mth><ignore>docs__open …</ignore></th>",
+      },
+      { role: "user", content: "and page 2?" },
+    ],
+  });
+
+  const item = request.input.find((entry) => entry.type === "reasoning");
+  assert.deepEqual(item, { type: "reasoning", content: [{ type: "reasoning_text", text: "weighing options" }] });
+});
 
 test("stripNotes removes a note and leaves the surrounding answer alone", () => {
   assert.equal(stripNotes(`answer\n<th>${note("docs__read_page …")}</th>`), "answer");

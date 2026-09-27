@@ -41,3 +41,14 @@ export function stripNotes(text) {
 
   return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+
+// The <th>/<mth> wrapper is ours, so it is removed as well when the thinking has to be handed back
+// to a provider: the model should see its own reasoning, not the markup we wrapped it in.
+export function stripWrapper(text) {
+  const withoutNotes = stripNotes(text);
+  if (typeof withoutNotes !== "string") return withoutNotes;
+  return withoutNotes
+    .replace(/<\/?m?th\b[^>]*>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

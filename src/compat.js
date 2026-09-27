@@ -1,5 +1,5 @@
 import { boolValue, defaultedString, stableId, stringValue } from "./util.js";
-import { stripNotes } from "./notes.js";
+import { stripNotes, stripWrapper } from "./notes.js";
 import {
   newOpenAIResponse,
   openAIOutputItem,
@@ -96,6 +96,13 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false } = {}) {
         input.push({ role: "user", content: chatMessageContent(item.content) });
         break;
       case "assistant": {
+        // Providers with thinking mode require their reasoning back verbatim on the next turn
+        // (DeepSeek answers 400 otherwise), so it is replayed as a reasoning item with our own
+        // wrapper and bookkeeping removed.
+        const reasoning = stripWrapper(stringValue(item, "reasoning_content"));
+        if (reasoning !== "") {
+          input.push({ type: "reasoning", content: [{ type: "reasoning_text", text: reasoning }] });
+        }
         const text = stripNotes(chatContentText(item.content));
         if (text !== "") input.push({ role: "assistant", content: text });
         if (Array.isArray(item.tool_calls)) {

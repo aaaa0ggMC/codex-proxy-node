@@ -1,4 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { boolValue, defaultedString, randomHex, stringValue } from "./util.js";
 import {
   aggregateResponsesStream,
@@ -322,6 +324,49 @@ export class Server {
             `[attachment ${filename} could not be read: only inline file_data for .pdf and .pptx is supported]`,
         };
       }
+      // Some clients do not attach the bytes at all: they mention the file as a URL or a path
+      // inside the text. Fetching that reference is what makes "look at this deck" work for them.
+      await this.#ingestReferences(message);
+    }
+  }
+
+  async #ingestReferences(message) {
+    const additions = [];
+    for (const part of message.content) {
+      if (part?.type !== "text" || typeof part.text !== "string") continue;
+      for (const match of part.text.matchAll(/https?:\/\/[^\s<>"')]+\.(?:pdf|pptx)|\/[^\s<>"')]+\.(?:pdf|pptx)/gi)) {
+        const reference = match[0];
+        try {
+          const bytes = await this.#readReference(reference);
+          if (bytes == null) continue;
+          const descriptor = await this.registry.ingest({
+            filename: path.basename(reference),
+            data: bytes.toString("base64"),
+          });
+          if (descriptor != null) additions.push({ type: "text", text: descriptor });
+        } catch (err) {
+          this.log.warn("attachment reference could not be read", { reference, error: err.message });
+        }
+      }
+    }
+    if (additions.length > 0) message.content.push(...additions);
+  }
+
+  // Only the two extensions the docs plugin understands, and never more than a sane attachment
+  // size, so a stray URL in a message cannot make the proxy download something huge.
+  async #readReference(reference) {
+    if (/^https?:/i.test(reference)) {
+      const resp = await fetch(reference, { signal: AbortSignal.timeout(30_000) });
+      if (!resp.ok) return null;
+      const length = Number(resp.headers.get("content-length") ?? 0);
+      if (length > 64 * 1024 * 1024) throw new Error(`attachment is too large (${length} bytes)`);
+      return Buffer.from(await resp.arrayBuffer());
+    }
+    try {
+      return await readFile(reference);
+    } catch (err) {
+      this.log.info("attachment reference is not on this filesystem", { reference, error: err.code });
+      return null;
     }
   }
 
@@ -487,6 +532,15 @@ export class Server {
           }
           case "response.output_item.done": {
             const item = event.data.item;
+            if (item != null && typeof item === "object" && stringValue(item, "type") === "reasoning") {
+              // Hand the provider's own thinking to the client in the shape it replays back.
+              const thinking = reasoningTextOf(item);
+              if (thinking !== "") {
+                openReasoning();
+                sendChunk([openAIChatDeltaChoice({ reasoning_content: thinking }, null)], null);
+              }
+              break;
+            }
             if (item == null || typeof item !== "object" || stringValue(item, "type") !== "function_call") {
               break;
             }
@@ -525,6 +579,15 @@ export class Server {
     writeSSEDone(res);
     res.end();
   }
+}
+
+// A Responses reasoning item keeps its text either in content[].reasoning_text or in summary[].text.
+function reasoningTextOf(item) {
+  const parts = Array.isArray(item.content) ? item.content : Array.isArray(item.summary) ? item.summary : [];
+  return parts
+    .filter((part) => part != null && typeof part === "object" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("");
 }
 
 function formatDuration(ms) {
