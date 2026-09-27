@@ -28,7 +28,6 @@ const flagSpec = {
   "max-turns": { type: "int", fallback: 4, help: "maximum agent loop turns per request" },
   "discard-images": { type: "int", fallback: 0, help: "keep images from only the last N tool results (0 keeps all)" },
   config: { type: "string", fallback: "", help: "config.json describing several providers; defaults to CODEX_PROXY_CONFIG" },
-  progress: { type: "bool", fallback: false, help: "write local tool progress into the answer so a chat client shows it" },
 };
 
 export class HelpRequested extends Error {}
@@ -148,7 +147,6 @@ export function parseFlags(args, env = process.env) {
     maxTurns: cfg["max-turns"],
     discardImages: cfg["discard-images"],
     config: cfg.config,
-    progress: cfg.progress,
   };
 }
 

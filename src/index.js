@@ -66,7 +66,6 @@ async function main(argv) {
     registry,
     maxTurns: cfg.maxTurns,
     discardImages: cfg.discardImages,
-    progress: cfg.progress,
   });
 
   const httpServer = http.createServer(server.handler());

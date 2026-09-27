@@ -17,6 +17,7 @@ import {
 import { setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
 import { usageReport, usageText, usageValue } from "./usage.js";
 import { runAgent } from "./agent/loop.js";
+import { note } from "./notes.js";
 
 export class Server {
   #usageLock = Promise.resolve();
@@ -401,14 +402,12 @@ export class Server {
             sendChunk([openAIChatDeltaChoice({ content: stringValue(event.data, "delta") }, null)], null);
             break;
           case "codex_proxy.tool_start":
-            // Opt-in: the only channel a chat client renders is the message itself, so visible
-            // progress means writing into the answer.
-            if (this.progress) {
-              sendChunk(
-                [openAIChatDeltaChoice({ content: `\n\n_[${stringValue(event.data, "name")}]_…\n\n` }, null)],
-                null,
-              );
-            }
+            // Reported as thinking rather than as answer text: a client renders it, and the marker
+            // lets the same proxy strip it back out of the replayed history (see notes.js).
+            sendChunk(
+              [openAIChatDeltaChoice({ reasoning_content: note(`${stringValue(event.data, "name")} …`) }, null)],
+              null,
+            );
             break;
           case "response.output_text.annotation.added": {
             const annotation = event.data.annotation;

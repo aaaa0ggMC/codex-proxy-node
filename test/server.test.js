@@ -460,7 +460,8 @@ test("a slow local tool keeps the stream alive and can report progress", async (
     });
     const text = await resp.text();
     assert.match(text, /keepalive/, "the socket must stay busy while a local tool runs");
-    assert.match(text, /docs__slow/, "progress should be visible when enabled");
+    assert.match(text, /codex-proxy-ignore/, "progress rides the reasoning channel");
+    assert.match(text, /docs__slow/);
     assert.ok(text.trimEnd().endsWith("data: [DONE]"));
     assert.ok(!text.includes('"tool_calls"'), "the local tool call must stay hidden");
   } finally {

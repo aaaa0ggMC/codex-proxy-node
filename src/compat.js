@@ -1,4 +1,5 @@
 import { boolValue, defaultedString, stableId, stringValue } from "./util.js";
+import { stripNotes } from "./notes.js";
 import {
   newOpenAIResponse,
   openAIOutputItem,
@@ -95,7 +96,7 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false } = {}) {
         input.push({ role: "user", content: chatMessageContent(item.content) });
         break;
       case "assistant": {
-        const text = chatContentText(item.content);
+        const text = stripNotes(chatContentText(item.content));
         if (text !== "") input.push({ role: "assistant", content: text });
         if (Array.isArray(item.tool_calls)) {
           for (const [index, toolCall] of item.tool_calls.entries()) {
