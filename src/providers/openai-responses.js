@@ -7,11 +7,12 @@ import { stringValue } from "../util.js";
 export class OpenAIResponsesProvider {
   id = "openai-responses";
 
-  constructor({ name, baseURL, apiKey = "", model = "", headers = {}, staticModels = [] }) {
+  constructor({ name, baseURL, apiKey = "", model = "", reasoningEffort = "", headers = {}, staticModels = [] }) {
     this.name = name;
     this.baseURL = baseURL.replace(/\/+$/, "");
     this.apiKey = apiKey;
     this.model = model;
+    this.reasoningEffort = reasoningEffort;
     this.headers = headers;
     this.staticModels = staticModels;
   }
@@ -34,7 +35,11 @@ export class OpenAIResponsesProvider {
   }
 
   async *events(request, signal) {
-    const body = this.model !== "" ? { ...request, model: this.model } : request;
+    let body = this.model !== "" ? { ...request, model: this.model } : request;
+    // The Responses API spells effort as reasoning.effort; only supply it when the caller did not.
+    if (this.reasoningEffort !== "" && body.reasoning == null) {
+      body = { ...body, reasoning: { effort: this.reasoningEffort } };
+    }
     const resp = await this.#request(
       "/responses",
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },

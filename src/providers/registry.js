@@ -23,6 +23,7 @@ const PROVIDER_TYPES = {
       baseURL: requireField(name, cfg, "base_url"),
       apiKey: apiKeyOf(cfg),
       model: cfg.model ?? "",
+      reasoningEffort: cfg.reasoning_effort ?? "",
       headers: cfg.headers ?? {},
       staticModels: (cfg.models ?? []).map((slug) => ({ slug, supported_in_api: true, visibility: "list" })),
     }),
