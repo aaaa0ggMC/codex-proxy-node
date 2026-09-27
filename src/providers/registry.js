@@ -69,13 +69,9 @@ export async function loadProviderConfig(file, { log, tokens = null, env = proce
   const providers = [];
   for (const cfg of entries) {
     if (cfg?.enabled === false) continue;
-    // An empty name means "use the type", so `{ name: "", type: "codex" }` is valid and lands in
-    // the codex namespace rather than an unnamed one.
-    const name = typeof cfg?.name === "string" && cfg.name.trim() !== "" ? cfg.name.trim() : cfg?.type;
-    if (typeof name !== "string" || name === "") {
-      log?.error("provider skipped: no name", { type: cfg?.type });
-      continue;
-    }
+    // `name` is the namespace. An empty name means no namespace at all: that provider's models are
+    // exposed under their bare ids, so a client asks for `gpt-5.5`, not `codex/gpt-5.5`.
+    const name = typeof cfg?.name === "string" ? cfg.name.trim() : "";
     const build = PROVIDER_TYPES[cfg?.type];
     if (build == null) {
       log?.error("provider skipped: unknown type", { provider: name, type: cfg?.type });
@@ -159,6 +155,8 @@ export class ProviderRegistry {
     if (split.provider !== "") return split;
     await this.#refreshIndex(signal);
     const owners = this.index.get(stripSearch(split.model)) ?? [];
+    // A provider that opted out of a namespace owns its bare ids outright.
+    if (owners.includes("")) return { provider: "", model: split.model };
     if (owners.length === 1) return { provider: owners[0], model: split.model };
     if (owners.length > 1) {
       this.log?.warn("model exists on several providers; using the default", { model, owners });
@@ -173,7 +171,11 @@ export class ProviderRegistry {
     const out = [];
     const seen = new Set();
     for (const { provider, model } of collected) {
-      for (const id of [`${provider}/${model.slug}`, ...(this.index.get(model.slug)?.length === 1 ? [model.slug] : [])]) {
+      const ids =
+        provider === ""
+          ? [model.slug]
+          : [`${provider}/${model.slug}`, ...(this.index.get(model.slug)?.length === 1 ? [model.slug] : [])];
+      for (const id of ids) {
         if (seen.has(id)) continue;
         seen.add(id);
         out.push({
@@ -190,7 +192,7 @@ export class ProviderRegistry {
 
   async *events(request, signal) {
     const { provider, model } = await this.route(request.model, signal);
-    const candidates = provider === "" ? [] : this.#require(provider);
+    const candidates = this.#require(provider);
     if (candidates.length === 0) throw new Error("no providers are configured");
 
     let lastError = null;

@@ -5,7 +5,7 @@
       "name": "",
       "type": "codex",
       "enabled": true,
-      "comment": "An empty name falls back to the type, so this lands in the codex namespace. No key: it uses the ChatGPT login in auth.json; codex_home can point at a second account."
+      "comment": "name is the namespace. An empty name means no namespace, so this provider's models are asked for as gpt-5.5 rather than codex/gpt-5.5. No key: it uses the ChatGPT login in auth.json; codex_home can point at a second account."
     },
     {
       "name": "deepseek",

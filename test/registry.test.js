@@ -165,7 +165,7 @@ test("providers may be an array, and a shared name fails over", async () => {
   assert.deepEqual(seen, [{ provider: "deepseek", model: "deepseek-flash" }], "the second entry served it");
 });
 
-test("an empty name falls back to the provider type", async () => {
+test("an empty name means no namespace, so models are exposed bare", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "codex-noname-"));
   const file = path.join(dir, "config.json");
   await writeFile(
@@ -173,14 +173,27 @@ test("an empty name falls back to the provider type", async () => {
     JSON.stringify({
       providers: [
         { name: "", type: "codex" },
-        { name: "   ", type: "openai-responses", base_url: "https://a.test/v1", api_key: "k" },
-        { type: "openai-responses", base_url: "https://b.test/v1", api_key: "k" },
+        { type: "openai-responses", base_url: "https://a.test/v1", api_key: "k" },
+        { name: "deepseek", type: "openai-responses", base_url: "https://b.test/v1", api_key: "k" },
       ],
     }),
   );
 
   const { providers } = await loadProviderConfig(file);
-  assert.deepEqual(providers.map(([name]) => name), ["codex", "openai-responses", "openai-responses"]);
+  assert.deepEqual(providers.map(([name]) => name), ["", "", "deepseek"]);
+
+  const registry = new ProviderRegistry({
+    defaultProvider: "",
+    providers: [
+      ["", { id: "c", models: async () => [{ slug: "gpt-5.5", supported_in_api: true, visibility: "list" }], async *events() {}, usage: async () => null }],
+      ["deepseek", { id: "d", models: async () => [{ slug: "deepseek-flash", supported_in_api: true, visibility: "list" }], async *events() {}, usage: async () => null }],
+    ],
+  });
+  const ids = (await registry.models()).map((m) => m.slug);
+  assert.ok(ids.includes("gpt-5.5"), `expected a bare id: ${ids.join(", ")}`);
+  assert.ok(!ids.some((id) => id.startsWith("/")), "no empty namespace prefix may be emitted");
+  assert.ok(ids.includes("deepseek/deepseek-flash"));
+  assert.deepEqual(await registry.route("gpt-5.5"), { provider: "", model: "gpt-5.5" });
 });
 
 test("a failure after the first event is not retried", async () => {

@@ -274,9 +274,16 @@ Provider types are `codex` (ChatGPT Codex login), `openai` (Chat Completions, br
 without deleting it, and a provider that fails to list models is skipped with a warning rather than
 blanking the catalogue.
 
-Model ids are advertised both as `provider/model` and, when unambiguous across providers, as the
-bare id — so a client with `gpt-5.6-luna` saved in its history keeps resolving. Routing prefers the
-explicit `provider/model` form, then a unique bare id, then `default_provider`.
+`name` is the namespace, and it decides how the models are addressed:
+
+- a named provider advertises `provider/model` (and the bare id too, when no other namespace claims
+  it) — so a client with `gpt-5.6-luna` saved in its history keeps resolving;
+- a provider with **no name** is not namespaced at all, so its models are asked for as `gpt-5.5`
+  rather than `codex/gpt-5.5`. That is the usual choice when there is only one upstream that cares
+  about bare ids.
+
+Routing prefers the explicit `provider/model` form, then a bare id owned by an un-namespaced
+provider, then a unique bare id, then `default_provider`.
 
 Keys may be written either way: `api_key_env` names an environment variable, `api_key` holds the
 value inline. If both are present the environment wins when it has a value, so a deployment can
