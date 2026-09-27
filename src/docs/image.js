@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { run } from "./exec.js";
+import { imageMaxEdge } from "./settings.js";
 
 // Decks and PDF pages routinely embed multi-megabyte images. Base64 inflates them by a third and
 // the model pays for every pixel, so anything headed upstream is re-encoded small first.
@@ -34,7 +35,7 @@ async function encoder() {
 
 // shrinkImage returns a JPEG sized for a vision model. Without ImageMagick it degrades to the
 // original bytes rather than failing the whole tool call.
-export async function shrinkImage(buffer, mime, { maxEdge = 1600, quality = 82 } = {}) {
+export async function shrinkImage(buffer, mime, { maxEdge = imageMaxEdge(), quality = 82 } = {}) {
   const command = await encoder();
   if (command === "") return { mime, base64: buffer.toString("base64"), bytes: buffer.length };
 

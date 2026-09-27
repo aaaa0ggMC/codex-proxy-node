@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { run } from "./exec.js";
 import { shrinkImage } from "./image.js";
+import { imageMaxEdge } from "./settings.js";
 
 // PDFs go through poppler: pdfinfo for the page count, pdftotext for the text, pdftoppm for a page
 // image. All three write to files or pipes, so nothing here needs a native module.
@@ -22,7 +23,7 @@ export async function pdfTextByPage(file) {
   return pages;
 }
 
-export async function renderPdfPage(file, page, { maxEdge = 1600, dpi = 110 } = {}) {
+export async function renderPdfPage(file, page, { maxEdge = imageMaxEdge(), dpi = 110 } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "codex-pdf-"));
   try {
     const prefix = path.join(dir, "page");

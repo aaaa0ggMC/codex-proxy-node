@@ -17,6 +17,7 @@ test("parseFlags applies the documented defaults", () => {
     maxTurns: 256,
     discardImages: 0,
     config: "",
+    imageMaxEdge: 1100,
   });
 });
 

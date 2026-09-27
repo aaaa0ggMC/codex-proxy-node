@@ -12,6 +12,7 @@ import { usageTTLFromEnv } from "./usage.js";
 import { createLoggerTo } from "./log.js";
 import { buildRegistry, loadPlugins } from "./plugins/loader.js";
 import { loadDisabledPlugins } from "./admin.js";
+import { setImageMaxEdge } from "./docs/settings.js";
 
 // Prefer IPv4 when resolving the upstream. Go's dialer does happy-eyeballs and falls back on its
 // own, but Node connects to the first address DNS hands back; on dual-stack and fake-IP (TUN)
@@ -36,6 +37,7 @@ async function main(argv) {
   }
 
   const log = createLoggerTo(process.stderr);
+  setImageMaxEdge(cfg.imageMaxEdge);
   const tokens = new TokenSource({ codexHome: cfg.codexHome });
 
   // Either one provider from the CLI flags, or several from config.json. The registry presents

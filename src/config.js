@@ -7,6 +7,7 @@ export const webSearchEnv = "CODEX_PROXY_WEB_SEARCH";
 
 const providerEnvs = {
   provider: "CODEX_PROXY_PROVIDER",
+  "image-max-edge": "CODEX_PROXY_IMAGE_MAX_EDGE",
   config: "CODEX_PROXY_CONFIG",
   upstream: "CODEX_PROXY_UPSTREAM",
   "upstream-key": "CODEX_PROXY_UPSTREAM_KEY",
@@ -28,6 +29,7 @@ const flagSpec = {
   "max-turns": { type: "int", fallback: 256, help: "maximum agent loop turns per request; a runaway guard, not a working limit" },
   "discard-images": { type: "int", fallback: 0, help: "keep images from only the last N tool results (0 keeps all)" },
   config: { type: "string", fallback: "", help: "config.json describing several providers; defaults to CODEX_PROXY_CONFIG" },
+  "image-max-edge": { type: "int", fallback: 1100, help: "longest edge, in pixels, of an image handed to the model (256-4096)" },
 };
 
 export class HelpRequested extends Error {}
@@ -147,6 +149,7 @@ export function parseFlags(args, env = process.env) {
     maxTurns: cfg["max-turns"],
     discardImages: cfg["discard-images"],
     config: cfg.config,
+    imageMaxEdge: cfg["image-max-edge"],
   };
 }
 
