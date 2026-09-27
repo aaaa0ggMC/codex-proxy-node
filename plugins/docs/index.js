@@ -48,7 +48,7 @@ export default {
       return `[attachment ${filename} has no inline data; only file_data is supported, so it was not read]`;
     }
     const document = remember(await openDocumentFromBuffer(filename, Buffer.from(data, "base64")));
-    return `Attachment received as doc ${document.id}\n${await outlineOf(document, { maxPages: 12 })}`;
+    return `Attachment received as doc ${document.id}\n${await outlineOf(document)}`;
   },
   tools: [
     {

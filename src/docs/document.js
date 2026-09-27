@@ -115,12 +115,20 @@ async function readFileBytes(file) {
   return readFile(file);
 }
 
-export async function outlineOf(document, { width = 100, maxPages = 40 } = {}) {
+// The outline lists every page's text in full: deciding how much of it to use is the model's call,
+// not ours. Only the page count is capped, and the cap is stated rather than applied silently, so
+// nothing looks like it ended early.
+export async function outlineOf(document, { maxPages = 40 } = {}) {
   const lines = [`${document.name} (${document.kind}, ${document.pageCount} ${document.pageLabel}s, ${(document.bytes / 1024).toFixed(0)}KB)`];
-  for (let page = 1; page <= Math.min(document.pageCount, maxPages); page++) {
-    const text = (await document.text(page)).replace(/\s+/g, " ").trim();
-    lines.push(`${page}. ${text.slice(0, width) || "(no text)"}`);
+  const shown = Math.min(document.pageCount, maxPages);
+  for (let page = 1; page <= shown; page++) {
+    const text = (await document.text(page)).replace(/[ \t]+/g, " ").trim();
+    lines.push(`${page}. ${text || "(no text)"}`);
   }
-  if (document.pageCount > maxPages) lines.push(`… ${document.pageCount - maxPages} more`);
+  if (document.pageCount > shown) {
+    lines.push(
+      `… ${document.pageCount - shown} more ${document.pageLabel}s not listed; call docs__read_page for those`,
+    );
+  }
   return lines.join("\n");
 }
