@@ -11,6 +11,7 @@ import { Server } from "./server.js";
 import { usageTTLFromEnv } from "./usage.js";
 import { createLoggerTo } from "./log.js";
 import { buildRegistry, loadPlugins } from "./plugins/loader.js";
+import { loadDisabledPlugins } from "./admin.js";
 
 // Prefer IPv4 when resolving the upstream. Go's dialer does happy-eyeballs and falls back on its
 // own, but Node connects to the first address DNS hands back; on dual-stack and fake-IP (TUN)
@@ -57,6 +58,12 @@ async function main(argv) {
   const toolCount = registry.names().size;
   if (toolCount > 0) log.info("plugins loaded", { tools: toolCount });
 
+  // A plugin switched off from the admin page stays off across restarts.
+  const pluginStateFile = path.join(import.meta.dirname, "..", "plugins-state.json");
+  for (const name of await loadDisabledPlugins(pluginStateFile)) {
+    if (registry.pluginNames().includes(name)) registry.setEnabled(name, false);
+  }
+
   const server = new Server({
     provider,
     log,
@@ -64,6 +71,7 @@ async function main(argv) {
     webSearch: cfg.webSearch,
     usageTTL: usageTTLFromEnv(),
     registry,
+    pluginStateFile,
     maxTurns: cfg.maxTurns,
     discardImages: cfg.discardImages,
   });
