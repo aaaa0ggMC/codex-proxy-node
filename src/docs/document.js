@@ -1,5 +1,7 @@
-import { stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { stableId } from "../util.js";
 import { shrinkImage } from "./image.js";
 import { pdfPageCount, pdfTextByPage, renderPdfPage } from "./pdf.js";
@@ -37,11 +39,35 @@ export async function documentId(file) {
   return stableId("doc", path.resolve(file), String(info.size), String(Math.round(info.mtimeMs)));
 }
 
+// An attachment arrives as bytes, not a path, and the client re-sends it on every turn. The id is
+// therefore derived from the content and the bytes are parked at a path derived from the same hash,
+// so the same attachment always produces the same document id and the prompt prefix never shifts.
+export async function openDocumentFromBuffer(filename, buffer) {
+  const hash = createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+  const extension = path.extname(filename).toLowerCase();
+  const dir = path.join(tmpdir(), "codex-proxy-docs");
+  await mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${hash}${extension}`);
+  try {
+    await stat(file);
+  } catch {
+    await writeFile(file, buffer, { mode: 0o600 });
+  }
+  return loadDocument({ id: `doc_${hash}`, file, name: path.basename(filename), extension, bytes: buffer.length });
+}
+
 export async function openDocument(file) {
-  const name = path.basename(file);
-  const extension = path.extname(file).toLowerCase();
-  const bytes = (await stat(file)).size;
-  const id = await documentId(file);
+  const info = await stat(file);
+  return loadDocument({
+    id: await documentId(file),
+    file,
+    name: path.basename(file),
+    extension: path.extname(file).toLowerCase(),
+    bytes: info.size,
+  });
+}
+
+async function loadDocument({ id, file, name, extension, bytes }) {
 
   if (extension === ".pptx") {
     const deck = parsePptx(await readFileBytes(file));

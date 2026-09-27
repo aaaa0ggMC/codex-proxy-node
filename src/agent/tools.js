@@ -30,6 +30,17 @@ export class ToolRegistry {
 
   ingestors = [];
 
+  // Attachments are handed to whichever plugin knows how to turn them into something the model can
+  // read. The first plugin that recognises the file wins.
+  async ingest(file) {
+    for (const plugin of this.ingestors) {
+      if (typeof plugin.ingestFile !== "function") continue;
+      const descriptor = await plugin.ingestFile(file);
+      if (descriptor != null) return descriptor;
+    }
+    return null;
+  }
+
   names() {
     return new Set(this.#tools.keys());
   }

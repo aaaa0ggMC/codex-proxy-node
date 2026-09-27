@@ -1,4 +1,5 @@
-import { openDocument, outlineOf, searchPages } from "../../src/docs/document.js";
+import path from "node:path";
+import { openDocument, openDocumentFromBuffer, outlineOf, searchPages } from "../../src/docs/document.js";
 
 // Documents the model can actually work with: text to search, pages to look at. Tools are the
 // whole interface — nothing is injected into the prompt up front, so the context only grows when
@@ -30,6 +31,17 @@ function remember(document) {
 export default {
   name: "docs",
   namespace: true,
+  // Chat attachments arrive as inline base64 rather than a path. Recognised ones become an open
+  // document plus a short descriptor; anything else returns null so another plugin can try.
+  async ingestFile({ filename, data }) {
+    const extension = path.extname(filename ?? "").toLowerCase();
+    if (extension !== ".pdf" && extension !== ".pptx") return null;
+    if (typeof data !== "string" || data === "") {
+      return `[attachment ${filename} has no inline data; only file_data is supported, so it was not read]`;
+    }
+    const document = remember(await openDocumentFromBuffer(filename, Buffer.from(data, "base64")));
+    return `Attachment received as doc ${document.id}\n${await outlineOf(document, { maxPages: 12 })}`;
+  },
   tools: [
     {
       name: "open",

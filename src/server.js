@@ -259,6 +259,15 @@ export class Server {
       return;
     }
 
+    // Chat attachments arrive inline, so turn them into open documents before translation. This
+    // has to happen per request because the client re-sends the file with every turn.
+    try {
+      await this.#ingestAttachments(raw);
+    } catch (err) {
+      writeOpenAIError(res, 400, err.message);
+      return;
+    }
+
     let request;
     let stream;
     try {
@@ -278,6 +287,31 @@ export class Server {
       writeJSON(res, 200, chatCompletionFromAggregate(agg, model));
     } catch (err) {
       writeOpenAIError(res, 502, err.message);
+    }
+  }
+
+  // Attachments are inline base64 in a "file" part. Each one is handed to the plugin registry and
+  // replaced by a text descriptor, so the translator never sees a shape the provider cannot take.
+  async #ingestAttachments(raw) {
+    if (this.registry == null || !Array.isArray(raw.messages)) return;
+    for (const message of raw.messages) {
+      if (!Array.isArray(message?.content)) continue;
+      for (let index = 0; index < message.content.length; index++) {
+        const part = message.content[index];
+        if (part == null || typeof part !== "object" || part.type !== "file") continue;
+        const file = part.file ?? part;
+        const filename = file.filename ?? "attachment";
+        const inline = typeof file.file_data === "string" ? file.file_data : "";
+        const comma = inline.indexOf(",");
+        const data = inline.startsWith("data:") && comma !== -1 ? inline.slice(comma + 1) : "";
+        const descriptor = await this.registry.ingest({ filename, data });
+        message.content[index] = {
+          type: "text",
+          text:
+            descriptor ??
+            `[attachment ${filename} could not be read: only inline file_data for .pdf and .pptx is supported]`,
+        };
+      }
     }
   }
 

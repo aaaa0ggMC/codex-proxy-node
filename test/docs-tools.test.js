@@ -96,3 +96,75 @@ test("the docs plugin rejects a page outside the document", async () => {
   );
   await assert.rejects(registry.call("docs__search", JSON.stringify({ doc: "nope.pptx", query: "x" })), /no open document/);
 });
+
+test("an inline attachment becomes an open document with a content-derived id", async () => {
+  const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
+  const file = await fixtureDeck();
+  const data = (await import("node:fs/promises")).readFile(file).then((b) => b.toString("base64"));
+
+  const first = await registry.ingest({ filename: "mini.pptx", data: await data });
+  const second = await registry.ingest({ filename: "mini.pptx", data: await data });
+
+  assert.match(first, /Attachment received as doc doc_[0-9a-f]{16}/);
+  assert.match(first, /mini\.pptx \(pptx, 2 slides/);
+  assert.equal(first, second, "the same bytes must produce the same descriptor for the prompt cache");
+
+  const docId = first.split("\n")[0].split(" ").pop();
+  const page = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 1 }));
+  assert.match(page[0].text, /Intro to widgets/);
+
+  assert.equal(await registry.ingest({ filename: "notes.txt", data: "AAAA" }), null, "unrecognised types fall through");
+});
+
+test("a chat file part is replaced by a descriptor before translation", async () => {
+  const { Server } = await import("../src/server.js");
+  const { silentLog, startHttpServer } = await import("../test-support/helpers.js");
+  const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
+  const file = await fixtureDeck();
+  const encoded = (await (await import("node:fs/promises")).readFile(file)).toString("base64");
+
+  let sent = null;
+  const provider = {
+    async *events(request) {
+      sent = request;
+      yield { type: "response.output_text.delta", data: { delta: "ok" } };
+      yield { type: "response.completed", data: { response: { id: "r", status: "completed" } } };
+    },
+    async models() {
+      return [];
+    },
+    async usage() {
+      return null;
+    },
+  };
+  const proxy = await startHttpServer(new Server({ provider, log: silentLog, usageTTL: 60, registry }).handler());
+  try {
+    const resp = await fetch(`${proxy.base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-5.5",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "summarise this" },
+              { type: "file", file: { filename: "mini.pptx", file_data: `data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,${encoded}` } },
+            ],
+          },
+        ],
+      }),
+    });
+    assert.equal(resp.status, 200);
+    const content = sent.input[0].content;
+    assert.equal(content[0].type, "input_text");
+    assert.match(content[1].text, /Attachment received as doc/);
+    assert.equal(
+      content.some((part) => part.type === "input_file"),
+      false,
+      "no file part may reach the provider",
+    );
+  } finally {
+    await proxy.close();
+  }
+});
