@@ -60,6 +60,20 @@ test("events are delegated to the routed provider, with the prefix stripped", as
   assert.deepEqual(seen, [{ provider: "deepseek", model: "deepseek-flash" }]);
 });
 
+test("usage resolves the un-namespaced namespace instead of treating it as unset", async () => {
+  const registry = new ProviderRegistry({
+    defaultProvider: "",
+    providers: [
+      ["", { id: "c", models: async () => [], async *events() {}, usage: async () => ({ plan_type: "plus" }) }],
+      ["deepseek", { id: "d", models: async () => [], async *events() {}, usage: async () => ({ plan_type: "deepseek" }) }],
+    ],
+  });
+
+  assert.deepEqual(await registry.usage(), { plan_type: "plus" });
+  assert.deepEqual(await registry.usage(undefined, "deepseek"), { plan_type: "deepseek" });
+  await assert.rejects(registry.usage(undefined, "nope"), /no provider in namespace "nope"/);
+});
+
 test("a search alias routes on the base model id", () => {
   assert.equal(stripSearch("gpt-5.6-luna-search-preview"), "gpt-5.6-luna");
   assert.equal(stripSearch("gpt-5.6-luna-search"), "gpt-5.6-luna");

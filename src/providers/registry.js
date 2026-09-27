@@ -215,10 +215,19 @@ export class ProviderRegistry {
     throw lastError ?? new Error(`provider ${JSON.stringify(provider)} produced no events`);
   }
 
-  async usage(signal, name = "") {
-    const target = name !== "" ? name : this.defaultProvider;
-    if (target === "") return null;
-    return this.#require(target)[0].usage(signal);
+  // `name` is undefined when the caller did not ask for one. An empty string is NOT that sentinel:
+  // it is the namespace of providers that opted out of namespacing, so it must be routable.
+  async usage(signal, name) {
+    const target = name ?? this.defaultProvider;
+    const candidates = this.providers.get(target);
+    if (candidates == null || candidates.length === 0) {
+      throw new Error(`no provider in namespace ${JSON.stringify(target)} can report usage`);
+    }
+    const report = await candidates[0].usage(signal);
+    if (report == null) {
+      throw new Error(`provider ${JSON.stringify(target)} does not report usage`);
+    }
+    return report;
   }
 }
 
