@@ -249,7 +249,10 @@ export class Server {
     let request;
     let stream;
     try {
-      ({ request, stream } = normalizeResponsesRequest(raw, { webSearch: this.webSearch }));
+      ({ request, stream } = normalizeResponsesRequest(raw, {
+        webSearch: this.webSearch,
+        searchAliases: await this.#searchAliases(raw.model, res),
+      }));
     } catch (err) {
       writeOpenAIError(res, 400, err.message);
       return;
@@ -301,7 +304,10 @@ export class Server {
     let request;
     let stream;
     try {
-      ({ request, stream } = buildResponsesRequestFromChat(raw, { webSearch: this.webSearch }));
+      ({ request, stream } = buildResponsesRequestFromChat(raw, {
+        webSearch: this.webSearch,
+        searchAliases: await this.#searchAliases(raw.model, res),
+      }));
     } catch (err) {
       writeOpenAIError(res, 400, err.message);
       return;
@@ -445,6 +451,13 @@ export class Server {
   // error that still carries the upstream status so the handler can mirror it.
   async #upstreamEvents(request, signal) {
     return this.provider.events(request, signal);
+  }
+
+  // Whether a -search model id should actually turn search on, asked of whichever provider owns
+  // the model. Kept per request: a shared flag would cross wires between concurrent requests.
+  async #searchAliases(model, res) {
+    if (typeof this.provider?.supportsSearchAliases !== "function") return false;
+    return this.provider.supportsSearchAliases(model, this.#signal(res));
   }
 
   #agent(req, res, request, disabledPlugins = []) {

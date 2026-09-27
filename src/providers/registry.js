@@ -190,6 +190,16 @@ export class ProviderRegistry {
     return out;
   }
 
+  // True only when the provider that owns this model can run a hosted search tool.
+  async supportsSearchAliases(model, signal) {
+    try {
+      const { provider } = await this.route(model, signal);
+      return this.#require(provider)[0].searchAliases === true;
+    } catch {
+      return false;
+    }
+  }
+
   async *events(request, signal) {
     const { provider, model } = await this.route(request.model, signal);
     const candidates = this.#require(provider);

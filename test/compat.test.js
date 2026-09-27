@@ -56,10 +56,27 @@ test("normalizeResponsesRequest resolves a -search model without enabling search
 });
 
 test("resolveModel strips the aliases down to the same upstream model", () => {
-  assert.equal(resolveModel("gpt-5.5-search"), "gpt-5.5");
-  assert.equal(resolveModel("gpt-5.5-search-preview"), "gpt-5.5");
-  assert.equal(resolveModel("gpt-4o-search-preview"), "gpt-5.5");
-  assert.equal(resolveModel("gpt-5.5"), "gpt-5.5");
+  assert.deepEqual(resolveModel("gpt-5.5-search"), { upstreamModel: "gpt-5.5", modelWantsSearch: false });
+  assert.deepEqual(resolveModel("gpt-5.5-search-preview"), { upstreamModel: "gpt-5.5", modelWantsSearch: false });
+  assert.deepEqual(resolveModel("gpt-4o-search-preview"), { upstreamModel: "gpt-5.5", modelWantsSearch: false });
+  assert.deepEqual(resolveModel("gpt-5.5"), { upstreamModel: "gpt-5.5", modelWantsSearch: false });
+});
+
+test("a -search alias asks for search only where the provider can serve it", () => {
+  assert.deepEqual(resolveModel("gpt-5.5-search", true), { upstreamModel: "gpt-5.5", modelWantsSearch: true });
+  const { request } = buildResponsesRequestFromChat(
+    { model: "gpt-5.5-search", messages: [{ role: "user", content: "news" }] },
+    { searchAliases: true },
+  );
+  assert.deepEqual(
+    request.tools.map((tool) => tool.type),
+    ["web_search"],
+  );
+
+  const plain = buildResponsesRequestFromChat(
+    { model: "gpt-5.5-search", messages: [{ role: "user", content: "news" }] },
+  );
+  assert.equal(plain.request.tools, undefined, "without a search-capable provider the suffix is inert");
 });
 
 test("buildResponsesRequestFromChat folds web_search_options into a tool", () => {

@@ -12,10 +12,10 @@ export const defaultInstructions = "You are a helpful assistant.";
 // NormalizeResponsesRequest fills in what the Codex backend requires (streaming, store=false)
 // and rejects what it cannot represent, so a caller gets a clear error instead of a silent
 // behaviour change.
-export function normalizeResponsesRequest(raw, { webSearch = false } = {}) {
+export function normalizeResponsesRequest(raw, { webSearch = false, searchAliases = false } = {}) {
   const model = stringValue(raw, "model");
   if (model === "") throw new Error("missing required field: model");
-  const upstreamModel = resolveModel(model);
+  const { upstreamModel, modelWantsSearch } = resolveModel(model, searchAliases);
 
   if (!("input" in raw)) throw new Error("missing required field: input");
   const normalizedInput = normalizeResponsesInput(raw.input);
@@ -31,7 +31,7 @@ export function normalizeResponsesRequest(raw, { webSearch = false } = {}) {
     if (key in raw) out[key] = raw[key];
   }
 
-  const { intent, options } = extractWebSearchIntent(raw, webSearch);
+  const { intent, options } = extractWebSearchIntent(raw, webSearch, modelWantsSearch);
 
   let tools = [];
   if (Array.isArray(raw.tools)) {
@@ -68,10 +68,10 @@ export function normalizeResponsesInput(input) {
   throw new Error("input must be a string, object, or array");
 }
 
-export function buildResponsesRequestFromChat(raw, { webSearch = false } = {}) {
+export function buildResponsesRequestFromChat(raw, { webSearch = false, searchAliases = false } = {}) {
   const model = stringValue(raw, "model");
   if (model === "") throw new Error("missing required field: model");
-  const upstreamModel = resolveModel(model);
+  const { upstreamModel, modelWantsSearch } = resolveModel(model, searchAliases);
 
   const messages = raw.messages;
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -138,7 +138,7 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false } = {}) {
   };
   if (instructions.length > 0) out.instructions = instructions.join("\n\n");
 
-  const { intent, options } = extractWebSearchIntent(raw, webSearch);
+  const { intent, options } = extractWebSearchIntent(raw, webSearch, modelWantsSearch);
 
   let tools = responsesToolsFromChat(raw.tools);
   if (intent) tools = mergeWebSearchTool(tools, options);
@@ -420,12 +420,14 @@ export function responsesToolsFromChat(value) {
 // ids saved per conversation, but they are pure aliases: they select the same model and do not
 // enable web search on their own. Search is a software feature, driven by web_search_options,
 // tools, tool_choice or --web-search.
-export function resolveModel(model) {
+export function resolveModel(model, searchAliases = false) {
   const lower = model.toLowerCase();
   for (const suffix of ["-search-preview", "-search"]) {
-    if (lower.endsWith(suffix)) return mapBaseModel(model.slice(0, -suffix.length));
+    if (lower.endsWith(suffix)) {
+      return { upstreamModel: mapBaseModel(model.slice(0, -suffix.length)), modelWantsSearch: searchAliases };
+    }
   }
-  return model;
+  return { upstreamModel: model, modelWantsSearch: false };
 }
 
 export function mapBaseModel(base) {

@@ -10,6 +10,10 @@ import { truncate } from "../util.js";
 export class CodexProvider {
   id = "codex";
 
+  // The ChatGPT Codex backend hosts a web_search tool, so a -search model id can mean something
+  // here. Providers whose API has no such tool leave this off and the suffix stays a pure alias.
+  searchAliases = true;
+
   constructor({ tokens }) {
     this.client = new CodexClient({ tokens });
   }
