@@ -326,7 +326,12 @@ export class Server {
     if (this.registry == null || !Array.isArray(raw.messages)) return;
     // The shape of what arrived, sizes only: enough to see where a prompt's tokens come from
     // without putting message content in the log.
+    // Names only. A capability the client claims but the provider never sees shows up here: the
+    // search toggle, for instance, is only real if the request actually carries it.
     this.log.info("chat request shape", {
+      top_level: Object.keys(raw).sort().join(","),
+      web_search_options: raw.web_search_options === undefined ? "absent" : JSON.stringify(raw.web_search_options),
+      client_tools: Array.isArray(raw.tools) ? raw.tools.map((tool) => stringValue(tool, "type") || stringValue(tool, "name") || "?").join(",") : "absent",
       messages: raw.messages.length,
       shape: raw.messages
         .map((message) => {
