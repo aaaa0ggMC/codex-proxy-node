@@ -499,7 +499,17 @@ export class Server {
         res.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
         step = await agent.next();
       }
-    } catch {
+    } catch (err) {
+      // Headers are already out, so the failure cannot become an HTTP status; say so in-band
+      // instead of leaving the client with a silently truncated stream.
+      this.log.error("responses stream failed", { error: err.message, status: err.status });
+      res.write(
+        `event: response.failed\ndata: ${JSON.stringify({
+          type: "response.failed",
+          response: { id: null, status: "failed", error: { message: err.message } },
+        })}\n\n`,
+      );
+      writeSSEDone(res);
       res.end();
       return;
     } finally {
@@ -623,7 +633,15 @@ export class Server {
         }
         step = await agent.next();
       }
-    } catch {
+    } catch (err) {
+      // Same reasoning as the responses path: the client must be told, not left hanging.
+      this.log.error("chat stream failed", { error: err.message, status: err.status });
+      closeReasoning();
+      sendChunk(
+        [openAIChatDeltaChoice({ content: `\n\n[codex-proxy] upstream failed mid-stream: ${err.message}\n` }, null)],
+        null,
+      );
+      writeSSEDone(res);
       res.end();
       return;
     } finally {
