@@ -4,3 +4,5 @@ node_modules/
 # Local multi-provider config. It names providers and points at env vars, but it is still the
 # file a user is most likely to paste a key into, so it never gets committed.
 config.json
+# Local plugin on/off state, written by the admin page.
+plugins-state.json
