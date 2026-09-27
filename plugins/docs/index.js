@@ -37,8 +37,11 @@ function resolve(reference) {
 
 // A checkpoint is the one thing worth keeping across a client's history compaction: which file the
 // id refers to. It rides the thinking channel out and is lifted back in as context (checkpoints.js).
-function checkpointSuffix(document) {
-  return `\n<checkpoint>${document.id} = ${document.name} (${document.pageCount} ${document.pageLabel}s)</checkpoint>`;
+function checkpointSuffix(document, source = "") {
+  // The path is the point: with it the model can reopen the document directly instead of searching
+  // again to rediscover where it was.
+  const where = source !== "" ? source : document.name;
+  return `\n<checkpoint>${document.id} = ${where} (${document.pageCount} ${document.pageLabel}s)</checkpoint>`;
 }
 
 function remember(document, descriptor = "") {
@@ -85,7 +88,7 @@ export default {
   tools: [
     {
       name: "open",
-      description: "Open a local document and get its text. Reads .pdf, .pptx, .docx, .xlsx, images, and text files such as .md, .txt, .csv and source code. Opening the same file twice returns the same document id, so it is safe to repeat after a context reset; the page tools also accept a path directly.",
+      description: "Open a local document and get its text. Reads .pdf, .pptx, .docx, .xlsx, images, and text files such as .md, .txt, .csv and source code. Reopening the same file returns the same id and costs nothing. A document can be referred to afterwards by its id, its hash, its file name, or its path.",
       parameters: {
         type: "object",
         properties: { path: { type: "string", description: "Absolute path to the file" } },
@@ -98,7 +101,7 @@ export default {
         const cached = descriptors.get(id);
         if (cached != null) return cached;
         const document = remember(await openDocument(path));
-        const descriptor = `doc ${document.id}\n${(await outlineOf(document)) + checkpointSuffix(document)}`;
+        const descriptor = `doc ${document.id}\n${(await outlineOf(document)) + checkpointSuffix(document, path)}`;
         descriptors.set(document.id, descriptor);
         return descriptor;
       },
