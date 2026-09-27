@@ -12,9 +12,6 @@
 export const IGNORE_OPEN = "<ignore>";
 export const IGNORE_CLOSE = "</ignore>";
 
-// Kept for history written by the previous format, which used a line prefix instead of a tag.
-export const LEGACY_PREFIX = "[codex-proxy-ignore]";
-
 export function note(text) {
   return `${IGNORE_OPEN}${text}${IGNORE_CLOSE}`;
 }
@@ -29,9 +26,7 @@ const ORPHAN_IGNORE = /<\/?ignore\b[^>]*>/gi;
 // half-formed or unbalanced block would otherwise leave behind.
 export function stripNotes(text) {
   if (typeof text !== "string") return text;
-  if (!text.includes("<ignore") && !text.includes("</ignore") && !text.includes(LEGACY_PREFIX)) {
-    return text;
-  }
+  if (!text.includes("<ignore") && !text.includes("</ignore")) return text;
 
   let out = text;
   for (let pass = 0; pass < 8; pass++) {
@@ -41,11 +36,6 @@ export function stripNotes(text) {
     out = out.replace(ORPHAN_IGNORE, "");
     // A thinking block that held nothing but bookkeeping should not survive as an empty shell.
     out = out.replace(EMPTY_TH, "");
-    // Legacy line-prefixed notes.
-    out = out
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith(LEGACY_PREFIX))
-      .join("\n");
     if (out === before) break;
   }
 

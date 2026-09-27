@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildResponsesRequestFromChat } from "../src/compat.js";
-import { LEGACY_PREFIX, note, stripNotes } from "../src/notes.js";
+import { note, stripNotes } from "../src/notes.js";
 
 test("stripNotes removes a note and leaves the surrounding answer alone", () => {
   assert.equal(stripNotes(`answer\n<th>${note("docs__read_page …")}</th>`), "answer");
@@ -21,13 +21,11 @@ test("stripNotes leaves nothing behind for awkward shapes", () => {
     `before<ignore>a</ignore>middle<ignore>b</ignore>after`,
     `broken</ignore>closer`,
     `<th>${note("<ignore>x</ignore>y")}</th>`,
-    `${LEGACY_PREFIX} old format note\nkept line`,
   ];
   for (const input of cases) {
     const out = stripNotes(input);
     assert.ok(!/<ignore/i.test(out), `residue in ${JSON.stringify(out)} from ${JSON.stringify(input)}`);
     assert.ok(!/<\/ignore/i.test(out), `closer residue in ${JSON.stringify(out)}`);
-    assert.ok(!out.includes(LEGACY_PREFIX), `legacy residue in ${JSON.stringify(out)}`);
   }
 });
 
@@ -45,5 +43,4 @@ test("a replayed thinking block never reaches the model", () => {
   assert.equal(assistant.content, "the answer");
   const payload = JSON.stringify(request);
   assert.ok(!payload.includes("<ignore"), "no marker may survive translation");
-  assert.ok(!payload.includes(LEGACY_PREFIX));
 });
