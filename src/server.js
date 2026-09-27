@@ -21,7 +21,7 @@ import { usageReport, usageText, usageValue } from "./usage.js";
 import { runAgent } from "./agent/loop.js";
 import { note } from "./notes.js";
 import { handleAdmin } from "./admin.js";
-import { applyModuleSwitches } from "./modules.js";
+import { applyInputSwitches, applyModuleSwitches } from "./modules.js";
 
 export class Server {
   #usageLock = Promise.resolve();
@@ -255,12 +255,18 @@ export class Server {
       return;
     }
 
+    // Same switch, expressed against the Responses input shape.
+    const disabledPlugins = applyInputSwitches(request.input, this.registry?.pluginNames() ?? []);
+    if (disabledPlugins.size > 0) {
+      this.log.info("modules disabled by switch", { modules: [...disabledPlugins] });
+    }
+
     if (stream) {
-      await this.#streamResponses(req, res, request);
+      await this.#streamResponses(req, res, request, disabledPlugins);
       return;
     }
     try {
-      const agg = await this.#aggregate(req, res, request);
+      const agg = await this.#aggregate(req, res, request, disabledPlugins);
       writeJSON(res, 200, serializeAggregate(agg));
     } catch (err) {
       writeOpenAIError(res, 502, err.message);
@@ -467,8 +473,8 @@ export class Server {
     return { stopKeepalive: () => clearInterval(timer) };
   }
 
-  async #streamResponses(req, res, request) {
-    const { agent, stopKeepalive } = this.#agent(req, res, request);
+  async #streamResponses(req, res, request, disabledPlugins = []) {
+    const { agent, stopKeepalive } = this.#agent(req, res, request, disabledPlugins);
 
     // Same eager first pull as the chat path, so an upstream refusal stays an HTTP status.
     let step;

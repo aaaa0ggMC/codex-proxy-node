@@ -83,3 +83,30 @@ export function applyModuleSwitches(messages, knownModules = []) {
   }
   return resolveSwitches(switches, knownModules);
 }
+
+// The Responses input is already normalised into items, and a message's content may be a plain
+// string or an array of input_text parts, so both shapes are handled here.
+export function applyInputSwitches(input, knownModules = []) {
+  if (!Array.isArray(input)) return new Set();
+  const switches = [];
+  let scanned = false;
+
+  const handle = (holder, key, isFirstUser) => {
+    const result = extractModuleSwitches(holder[key]);
+    holder[key] = result.text;
+    if (isFirstUser) switches.push(...result.switches);
+  };
+
+  for (const item of input) {
+    if (item == null || typeof item !== "object") continue;
+    const isFirstUser = !scanned && item.role === "user";
+    if (isFirstUser) scanned = true;
+    if (typeof item.content === "string") handle(item, "content", isFirstUser);
+    else if (Array.isArray(item.content)) {
+      for (const part of item.content) {
+        if (part?.type === "input_text" && typeof part.text === "string") handle(part, "text", isFirstUser);
+      }
+    }
+  }
+  return resolveSwitches(switches, knownModules);
+}

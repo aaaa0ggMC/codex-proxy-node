@@ -105,3 +105,17 @@ test("the spellings and the all/except form are understood", async () => {
   assert.deepEqual([...disabled].sort(), ["other", "stepfun"], "all, except docs");
   assert.equal(messages[0].content, "please read it");
 });
+
+test("the switch works on the responses input shape too", async () => {
+  const { applyInputSwitches } = await import("../src/modules.js");
+  const input = [
+    {
+      role: "user",
+      content: '<disable_modules>all</disable_modules><enable_module name="docs" />please read the deck',
+    },
+    { role: "user", content: [{ type: "input_text", text: "and page 2?" }] },
+  ];
+  const disabled = applyInputSwitches(input, ["docs", "other"]);
+  assert.deepEqual([...disabled], ["other"], "a plain-string content switches too");
+  assert.equal(input[0].content, "please read the deck");
+});
