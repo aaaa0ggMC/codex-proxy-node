@@ -9,6 +9,7 @@ import { stringValue } from "../util.js";
 
 export class ToolRegistry {
   #tools = new Map();
+  #disabled = new Set();
 
   register(plugin) {
     const name = stringValue(plugin, "name");
@@ -45,18 +46,41 @@ export class ToolRegistry {
     return new Set(this.#tools.keys());
   }
 
+  // Toggling takes effect on the next request, because definitions() is read at the start of every
+  // agent run. Nothing is re-imported, so a running conversation is unaffected.
+  pluginNames() {
+    return [...new Set([...this.#tools.values()].map((tool) => tool.plugin))].sort();
+  }
+
+  toolsOf(pluginName) {
+    return [...this.#tools.values()].filter((tool) => tool.plugin === pluginName).map((tool) => tool.name);
+  }
+
+  isEnabled(pluginName) {
+    return !this.#disabled.has(pluginName);
+  }
+
+  setEnabled(pluginName, enabled) {
+    if (!this.pluginNames().includes(pluginName)) throw new Error(`unknown plugin ${JSON.stringify(pluginName)}`);
+    if (enabled) this.#disabled.delete(pluginName);
+    else this.#disabled.add(pluginName);
+    return enabled;
+  }
+
   owns(toolName) {
     return this.#tools.has(toolName);
   }
 
   // definitions returns the Responses API tool declarations for every registered tool.
   definitions() {
-    return [...this.#tools.values()].map((tool) => ({
-      type: "function",
-      name: tool.name,
-      description: tool.description ?? "",
-      parameters: tool.parameters ?? { type: "object", properties: {} },
-    }));
+    return [...this.#tools.values()]
+      .filter((tool) => this.isEnabled(tool.plugin))
+      .map((tool) => ({
+        type: "function",
+        name: tool.name,
+        description: tool.description ?? "",
+        parameters: tool.parameters ?? { type: "object", properties: {} },
+      }));
   }
 
   async call(toolName, rawArguments, ctx) {

@@ -20,6 +20,7 @@ import { setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
 import { usageReport, usageText, usageValue } from "./usage.js";
 import { runAgent } from "./agent/loop.js";
 import { note } from "./notes.js";
+import { handleAdmin } from "./admin.js";
 
 export class Server {
   #usageLock = Promise.resolve();
@@ -35,6 +36,7 @@ export class Server {
     discardImages = 0,
     progress = false,
     keepaliveMs = 15_000,
+    pluginStateFile = "",
   }) {
     this.provider = provider;
     this.log = log;
@@ -46,6 +48,7 @@ export class Server {
     this.discardImages = discardImages;
     this.progress = progress;
     this.keepaliveMs = keepaliveMs;
+    this.pluginStateFile = pluginStateFile;
     this.usageCache = null;
     this.usageCacheAt = 0;
   }
@@ -104,6 +107,17 @@ export class Server {
     log.info("request started");
     try {
       this.#applyUsageHeaders(res);
+      // The plugin admin page is served without a key only when no key is configured, so a
+      // key-protected deployment does not accidentally expose a control plane.
+      if (this.registry != null && this.apiKey === "" && this.pluginStateFile !== "") {
+        if (await handleAdmin(req, res, url, {
+          registry: this.registry,
+          stateFile: this.pluginStateFile,
+          log: this.log,
+        })) {
+          return;
+        }
+      }
       if (!this.#authorized(req)) {
         res.setHeader("WWW-Authenticate", 'Bearer realm="codex-proxy"');
         writeOpenAIError(res, 401, "missing or invalid API key");
