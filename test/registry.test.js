@@ -86,7 +86,7 @@ test("one unreachable provider does not blank the catalogue", async () => {
     providers: [["broken", broken], ["codex", fakeProvider("codex", ["m1"])]],
   });
   const ids = (await r.models()).map((m) => m.slug);
-  assert.deepEqual(ids, ["codex/m1", "m1"]);
+  assert.deepEqual(ids, ["codex/m1"], "a named provider is advertised once, not bare as well");
 });
 
 test("loadProviderConfig skips disabled and unknown providers", async () => {
