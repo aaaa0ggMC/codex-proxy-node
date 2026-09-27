@@ -63,10 +63,22 @@ export class Server {
     });
 
     let bytes = 0;
+    const count = (chunk) => {
+      if (typeof chunk === "string") bytes += Buffer.byteLength(chunk);
+      else if (Buffer.isBuffer(chunk)) bytes += chunk.length;
+      else if (chunk instanceof Uint8Array) bytes += chunk.byteLength;
+    };
+    // Node writes short bodies with res.end(body), which never touches res.write, so both need
+    // wrapping for the byte count to match what actually went out.
     const write = res.write.bind(res);
     res.write = (chunk, ...rest) => {
-      if (chunk != null) bytes += Buffer.byteLength(chunk);
+      count(chunk);
       return write(chunk, ...rest);
+    };
+    const end = res.end.bind(res);
+    res.end = (chunk, ...rest) => {
+      count(chunk);
+      return end(chunk, ...rest);
     };
 
     log.info("request started");

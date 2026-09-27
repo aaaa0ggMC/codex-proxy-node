@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
 import { Server } from "../src/server.js";
 import { CodexClient } from "../src/codex.js";
+import { createLoggerTo } from "../src/log.js";
 import { silentLog, startHttpServer, withEndpoints } from "../test-support/helpers.js";
 
 const usagePayload = {
@@ -363,6 +365,31 @@ test("a configured API key is enforced", async () => {
 
     const wrong = await fetch(`${proxy.base}/healthz`, { headers: { Authorization: "Bearer nope" } });
     assert.equal(wrong.status, 401);
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("the request log reports the bytes actually written", async () => {
+  const lines = [];
+  const log = createLoggerTo(
+    new Writable({
+      write(chunk, _encoding, callback) {
+        lines.push(chunk.toString());
+        callback();
+      },
+    }),
+  );
+  const codex = new CodexClient({
+    tokens: { token: async () => ({ accessToken: "tok", accountId: "acct-1" }) },
+  });
+  const server = new Server({ codex, log, usageTTL: 60 });
+  const proxy = await startHttpServer(server.handler());
+  try {
+    await fetch(`${proxy.base}/healthz`);
+    const finished = lines.find((line) => line.includes("request finished"));
+    assert.ok(finished, `expected a finished log line in ${lines.join("")}`);
+    assert.match(finished, /status=200 bytes=11/, `unexpected log line: ${finished}`);
   } finally {
     await proxy.close();
   }
