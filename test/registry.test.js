@@ -33,13 +33,12 @@ function registry(seen = []) {
   });
 }
 
-test("models aggregates every provider, prefixing ids and keeping unique bare ones", async () => {
+test("models aggregates every provider under exactly one id each", async () => {
   const ids = (await registry().models()).map((m) => m.slug);
   for (const id of ["codex/gpt-5.6-luna", "deepseek/deepseek-flash", "deepseek/shared-model", "other/shared-model"]) {
     assert.ok(ids.includes(id), `expected ${id} in ${ids.join(", ")}`);
   }
-  assert.ok(ids.includes("gpt-5.6-luna"), "a unique bare id must stay listed for saved histories");
-  assert.ok(!ids.includes("shared-model"), "an ambiguous bare id must not be advertised");
+  assert.deepEqual(ids.filter((id) => !id.includes("/")).sort(), [], "a namespaced provider is not also listed bare");
 });
 
 test("route prefers an explicit prefix, then a unique bare id, then the default", async () => {

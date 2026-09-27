@@ -171,10 +171,10 @@ export class ProviderRegistry {
     const out = [];
     const seen = new Set();
     for (const { provider, model } of collected) {
-      const ids =
-        provider === ""
-          ? [model.slug]
-          : [`${provider}/${model.slug}`, ...(this.index.get(model.slug)?.length === 1 ? [model.slug] : [])];
+      // Exactly one advertised form per model: namespaced providers are addressed as
+      // "provider/model", and providers without a name are addressed bare. Bare ids still resolve
+      // for a namespaced provider (see route), they are just not listed twice.
+      const ids = provider === "" ? [model.slug] : [`${provider}/${model.slug}`];
       for (const id of ids) {
         if (seen.has(id)) continue;
         seen.add(id);
