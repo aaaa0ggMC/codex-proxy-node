@@ -99,3 +99,29 @@ test("loadProviderConfig skips disabled and unknown providers", async () => {
   const viaEnv = JSON.parse(await readFile(file, "utf8"));
   assert.equal(viaEnv.providers.deepseek.api_key_env, "NOPE", "keys stay in the environment");
 });
+
+test("a provider key may be inline, from the environment, or both", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "codex-keys-"));
+  const file = path.join(dir, "config.json");
+  await writeFile(
+    file,
+    JSON.stringify({
+      providers: {
+        inline: { type: "openai-responses", base_url: "https://a.test/v1", api_key: "sk-inline" },
+        env: { type: "openai-responses", base_url: "https://b.test/v1", api_key_env: "MY_KEY" },
+        both: { type: "openai-responses", base_url: "https://c.test/v1", api_key_env: "MY_KEY", api_key: "sk-fallback" },
+      },
+    }),
+  );
+
+  const withEnv = await loadProviderConfig(file, { env: { MY_KEY: "sk-from-env" } });
+  const keys = Object.fromEntries(withEnv.providers.map(([name, p]) => [name, p.apiKey]));
+  assert.equal(keys.inline, "sk-inline");
+  assert.equal(keys.env, "sk-from-env");
+  assert.equal(keys.both, "sk-from-env", "the environment overrides the inline key");
+
+  const withoutEnv = await loadProviderConfig(file, { env: {} });
+  const fallback = Object.fromEntries(withoutEnv.providers.map(([name, p]) => [name, p.apiKey]));
+  assert.equal(fallback.env, "", "a missing variable yields no key");
+  assert.equal(fallback.both, "sk-fallback", "an empty variable must not shadow the inline key");
+});

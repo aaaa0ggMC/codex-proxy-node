@@ -9,19 +9,19 @@ import { OpenAIResponsesProvider } from "./openai-responses.js";
 
 const PROVIDER_TYPES = {
   codex: (name, cfg, ctx) => new CodexProvider({ tokens: ctx.tokens }),
-  openai: (name, cfg) =>
+  openai: (name, cfg, ctx) =>
     new OpenAICompatProvider({
       baseURL: requireField(name, cfg, "base_url"),
-      apiKey: apiKeyOf(cfg),
+      apiKey: apiKeyOf(cfg, ctx.env),
       model: cfg.model ?? "",
       reasoningEffort: cfg.reasoning_effort ?? "",
       headers: cfg.headers ?? {},
     }),
-  "openai-responses": (name, cfg) =>
+  "openai-responses": (name, cfg, ctx) =>
     new OpenAIResponsesProvider({
       name,
       baseURL: requireField(name, cfg, "base_url"),
-      apiKey: apiKeyOf(cfg),
+      apiKey: apiKeyOf(cfg, ctx.env),
       model: cfg.model ?? "",
       reasoningEffort: cfg.reasoning_effort ?? "",
       headers: cfg.headers ?? {},
@@ -37,13 +37,18 @@ function requireField(name, cfg, field) {
   return value;
 }
 
-// Keys come from an environment variable by preference, so config.json can be committed.
+// A provider may name an environment variable, write the key inline, or both. Environment wins
+// when it actually has a value (so a deployment can override without editing the file), and the
+// inline key is the fallback rather than being silently ignored.
 function apiKeyOf(cfg, env = process.env) {
-  if (cfg.api_key_env) return env[cfg.api_key_env] ?? "";
+  if (cfg.api_key_env) {
+    const value = env[cfg.api_key_env];
+    if (value) return value;
+  }
   return cfg.api_key ?? "";
 }
 
-export async function loadProviderConfig(file, { log, tokens = null } = {}) {
+export async function loadProviderConfig(file, { log, tokens = null, env = process.env } = {}) {
   const raw = JSON.parse(await readFile(file, "utf8"));
   const entries = raw.providers ?? raw;
   const providers = [];
@@ -55,7 +60,7 @@ export async function loadProviderConfig(file, { log, tokens = null } = {}) {
       continue;
     }
     try {
-      providers.push([name, build(name, cfg, { tokens })]);
+      providers.push([name, build(name, cfg, { tokens, env })]);
     } catch (err) {
       log?.error("provider skipped", { provider: name, error: err.message });
     }

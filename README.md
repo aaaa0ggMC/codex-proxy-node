@@ -272,7 +272,10 @@ Model ids are advertised both as `provider/model` and, when unambiguous across p
 bare id — so a client with `gpt-5.6-luna` saved in its history keeps resolving. Routing prefers the
 explicit `provider/model` form, then a unique bare id, then `default_provider`.
 
-`config.json` is git-ignored on purpose; keep keys in `api_key_env` so the file stays shareable.
+Keys may be written either way: `api_key_env` names an environment variable, `api_key` holds the
+value inline. If both are present the environment wins when it has a value, so a deployment can
+override a key without editing the file, and the inline key is used otherwise. `config.json` is
+git-ignored precisely so an inline key stays local; `config.example.json` is the shareable one.
 
 ## License
 

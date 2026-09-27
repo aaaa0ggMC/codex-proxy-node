@@ -12,6 +12,13 @@
       "api_key_env": "DEEPSEEK_API_KEY",
       "reasoning_effort": "low"
     },
+    "inline-key-example": {
+      "type": "openai",
+      "enabled": false,
+      "base_url": "https://api.example.com/v1",
+      "api_key": "sk-replace-me",
+      "reasoning_effort": "low"
+    },
     "stepfun": {
       "type": "openai",
       "enabled": false,
