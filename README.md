@@ -54,6 +54,16 @@ listening on http://127.0.0.1:6769
 | `--api-key` | `CODEX_PROXY_API_KEY` | empty | When set, requests need `Authorization: Bearer <key>`. |
 | `--web-search` | `CODEX_PROXY_WEB_SEARCH` | off | Enable the web search tool for every request. |
 | – | `CODEX_PROXY_USAGE_TTL_SECONDS` | `15` | How long a fetched usage report may be reused. `0` always refreshes. |
+| `--provider` | `CODEX_PROXY_PROVIDER` | `codex` | `codex` (ChatGPT login) or `openai` (any OpenAI-compatible endpoint). |
+| `--upstream` | `CODEX_PROXY_UPSTREAM` | – | Base URL for the `openai` provider, e.g. `https://api.deepseek.com/v1`. |
+| `--upstream-key` | `CODEX_PROXY_UPSTREAM_KEY` | – | Bearer token for the `openai` provider. |
+| `--upstream-model` | `CODEX_PROXY_UPSTREAM_MODEL` | – | Force a model id instead of passing the client's through. |
+| `--reasoning-effort` | `CODEX_PROXY_REASONING_EFFORT` | – | Reasoning effort sent to the `openai` provider (`low`, `medium`, `high`). |
+| `--config` | `CODEX_PROXY_CONFIG` | `config.json` if present | Several providers in one file; see Multi-provider config. |
+| `--image-max-edge` | `CODEX_PROXY_IMAGE_MAX_EDGE` | `1100` | Longest edge, in pixels, of an image handed to the model (256-4096). Bigger sees more detail and costs proportionally more tokens and bandwidth, since image bytes are re-sent every turn. |
+| `--max-turns` | – | `256` | Upper bound on agent loop turns per request; a runaway guard, not a working limit. |
+| `--discard-images` | – | `0` | Diagnostics only: keep images from the last N tool results. Non-zero breaks the prompt prefix on purpose. |
+| – | `CODEX_PROXY_USAGE_TTL_SECONDS` | `15` | How long a fetched usage report may be reused. `0` always refreshes. |
 
 To listen on a non-loopback interface you must set a proxy API key. Prefer the environment variable
 on shared systems, because `--api-key` shows up in shell history and process lists:
