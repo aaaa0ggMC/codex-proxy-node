@@ -112,7 +112,7 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false } = {}) {
         input.push({
           type: "function_call_output",
           call_id: callId,
-          output: chatContentText(item.content),
+          output: chatToolOutput(item.content),
         });
         break;
       }
@@ -232,6 +232,27 @@ export function chatMessageContent(content) {
     return parts;
   }
   throw new Error(`unsupported message content ${JSON.stringify(content)}`);
+}
+
+// chatToolOutput converts a tool message's content into a function_call_output body. Text-only
+// content stays a plain string, which is what almost every client sends; structured content
+// becomes the array of input_text / input_image / input_audio parts the Codex backend accepts as
+// a tool result, so a tool can hand images back instead of having them silently dropped.
+export function chatToolOutput(content) {
+  if (content == null) return "";
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts = [];
+    for (const item of content) {
+      if (item == null || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error("tool message content parts must be objects");
+      }
+      parts.push(responsesContentPart(item));
+    }
+    if (parts.length === 0) return "";
+    return parts;
+  }
+  throw new Error(`unsupported tool message content ${JSON.stringify(content)}`);
 }
 
 // responsesContentPart maps one chat content part onto its Responses equivalent. The Codex

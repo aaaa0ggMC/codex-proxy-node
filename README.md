@@ -119,6 +119,23 @@ Chat audio parts (`input_audio` with `data`/`format`) are translated to `input_a
 in the same way. The Codex backend has no file-attachment content type, so a `file` part is
 rejected with `HTTP 400` and an explicit message rather than being silently dropped.
 
+Tool results are rich too. A `tool` message whose `content` is an array is forwarded as the
+`function_call_output` body the backend expects, so a tool can return images alongside text:
+
+```json
+{
+  "role": "tool",
+  "tool_call_id": "call_1",
+  "content": [
+    { "type": "text", "text": "Rendered 1 slide." },
+    { "type": "image_url", "image_url": { "url": "data:image/png;base64,...", "detail": "high" } }
+  ]
+}
+```
+
+That is the hook a rich-content plugin (for example a deck renderer) needs to hand slides back to
+the model. A text-only tool result stays a plain string.
+
 The `/v1/responses` route stays a pass-through, so it forwards whatever content parts the caller
 sends.
 

@@ -195,3 +195,76 @@ test("buildResponsesRequestFromChat leaves a plain string content alone", () => 
   });
   assert.equal(userContent(request), "hello");
 });
+
+function toolResult(request) {
+  const item = request.input.find((entry) => entry.type === "function_call_output");
+  assert.ok(item, `expected a function_call_output: ${JSON.stringify(request.input)}`);
+  return item;
+}
+
+test("a text-only tool result stays a plain string", () => {
+  const { request } = buildResponsesRequestFromChat({
+    model: "gpt-5.5",
+    messages: [
+      { role: "user", content: "render it" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "render", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "Rendered 12 slides." },
+    ],
+  });
+
+  const result = toolResult(request);
+  assert.equal(result.call_id, "call_1");
+  assert.equal(result.output, "Rendered 12 slides.");
+});
+
+test("a tool result can hand an image back to the model", () => {
+  const { request } = buildResponsesRequestFromChat({
+    model: "gpt-5.5",
+    messages: [
+      { role: "user", content: "render it" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "render", arguments: "{}" } },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_1",
+        content: [
+          { type: "text", text: "Rendered 1 slide." },
+          { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=", detail: "high" } },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(toolResult(request).output, [
+    { type: "input_text", text: "Rendered 1 slide." },
+    { type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgo=", detail: "high" },
+  ]);
+});
+
+test("a tool result rejects content the backend cannot represent", () => {
+  assert.throws(
+    () =>
+      buildResponsesRequestFromChat({
+        model: "gpt-5.5",
+        messages: [
+          {
+            role: "tool",
+            tool_call_id: "call_1",
+            content: [{ type: "file", file: { filename: "notes.pdf" } }],
+          },
+        ],
+      }),
+    /unsupported message content type "file"/,
+  );
+});
