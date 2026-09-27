@@ -20,6 +20,7 @@ import { setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
 import { usageReport, usageText, usageValue } from "./usage.js";
 import { runAgent } from "./agent/loop.js";
 import { note } from "./notes.js";
+import { checkpoint } from "./checkpoints.js";
 import { handleAdmin } from "./admin.js";
 import { applyInputSwitches, applyModuleSwitches } from "./modules.js";
 
@@ -598,6 +599,14 @@ export class Server {
               [openAIChatDeltaChoice({ reasoning_content: stringValue(event.data, "delta") }, null)],
               null,
             );
+            break;
+          case "codex_proxy.checkpoint":
+            // Content, not bookkeeping: inside the folded block but outside <ignore>, so it is not
+            // stripped and the client keeps it for us.
+            openReasoning();
+            for (const block of event.data.blocks ?? []) {
+              sendChunk([openAIChatDeltaChoice({ reasoning_content: checkpoint(block) }, null)], null);
+            }
             break;
           case "codex_proxy.tool_start":
             // Reported as thinking rather than as answer text: a client renders it, and the marker

@@ -119,3 +119,26 @@ test("the switch works on the responses input shape too", async () => {
   assert.deepEqual([...disabled], ["other"], "a plain-string content switches too");
   assert.equal(input[0].content, "please read the deck");
 });
+
+test("a checkpoint from the replayed history comes back as context", async () => {
+  const { checkpoint } = await import("../src/checkpoints.js");
+  const messages = [
+    { role: "user", content: "read the deck" },
+    {
+      role: "assistant",
+      content: "done",
+      reasoning_content: `<th><mth>opened it</mth>${checkpoint("doc_abc = deck.pptx (10 slides)")}</th>`,
+    },
+    { role: "user", content: "and page 2?" },
+  ];
+
+  const { request } = buildResponsesRequestFromChat({ model: "gpt-5.5", messages });
+  const carried = request.input[request.input.length - 1];
+  assert.equal(carried.role, "developer");
+  assert.match(carried.content, /doc_abc = deck\.pptx \(10 slides\)/);
+  assert.ok(!JSON.stringify(request).includes("<checkpoint>"), "the tag must not reach the provider");
+
+  // The same history must produce the same bytes, or the prompt cache would be lost every turn.
+  const again = buildResponsesRequestFromChat({ model: "gpt-5.5", messages });
+  assert.deepEqual(again.request.input, request.input);
+});

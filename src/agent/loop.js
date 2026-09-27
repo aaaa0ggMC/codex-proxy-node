@@ -1,4 +1,5 @@
 import { stringValue } from "../util.js";
+import { extractCheckpoints } from "../checkpoints.js";
 
 // The agent loop: ask the provider for a turn, run whatever tools are ours, feed the results back,
 // and repeat. Anything the model asks a *client* to run is streamed straight through and ends the
@@ -171,6 +172,12 @@ export async function* runAgent({
       };
       try {
         const output = await registry.call(stringValue(call, "name"), call.arguments, { signal });
+        // A tool may hand back a checkpoint: it rides the client's thinking channel out and is
+        // lifted back in as context, so it survives even if this tool result is compacted away.
+        const found = extractCheckpoints(textOf(output));
+        if (found.blocks.length > 0) {
+          yield { type: "codex_proxy.checkpoint", data: { type: "codex_proxy.checkpoint", blocks: found.blocks } };
+        }
         outputs.push({ type: "function_call_output", call_id: callId, output });
       } catch (err) {
         // A failing tool is information, not a dead end: tell the model what went wrong.
@@ -183,6 +190,15 @@ export async function* runAgent({
     }
     input = [...input, ...localCalls.map(echoCall), ...outputs];
   }
+}
+
+function textOf(output) {
+  if (typeof output === "string") return output;
+  if (!Array.isArray(output)) return "";
+  return output
+    .filter((part) => part !== null && typeof part === "object" && part.type === "input_text")
+    .map((part) => String(part.text ?? ""))
+    .join("\n");
 }
 
 function echoCall(call) {

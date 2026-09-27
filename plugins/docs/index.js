@@ -34,6 +34,13 @@ function resolve(reference) {
   );
 }
 
+
+// A checkpoint is the one thing worth keeping across a client's history compaction: which file the
+// id refers to. It rides the thinking channel out and is lifted back in as context (checkpoints.js).
+function checkpointSuffix(document) {
+  return `\n<checkpoint>${document.id} = ${document.name} (${document.pageCount} ${document.pageLabel}s)</checkpoint>`;
+}
+
 function remember(document, descriptor = "") {
   if (opened.size >= MAX_OPEN) {
     const evicted = opened.keys().next().value;
@@ -73,7 +80,7 @@ export default {
       return `[attachment ${filename} could not be read: ${err.message}]`;
     }
     remember(document);
-    return `Attachment received as doc ${document.id}\n${await outlineOf(document)}`;
+    return `Attachment received as doc ${document.id}\n${(await outlineOf(document)) + checkpointSuffix(document)}`;
   },
   tools: [
     {
@@ -91,7 +98,7 @@ export default {
         const cached = descriptors.get(id);
         if (cached != null) return cached;
         const document = remember(await openDocument(path));
-        const descriptor = `doc ${document.id}\n${await outlineOf(document)}`;
+        const descriptor = `doc ${document.id}\n${(await outlineOf(document)) + checkpointSuffix(document)}`;
         descriptors.set(document.id, descriptor);
         return descriptor;
       },

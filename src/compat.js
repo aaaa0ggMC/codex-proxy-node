@@ -1,5 +1,6 @@
 import { boolValue, defaultedString, stableId, stringValue } from "./util.js";
 import { stripNotes, stripWrapper } from "./notes.js";
+import { extractCheckpoints } from "./checkpoints.js";
 import {
   newOpenAIResponse,
   openAIOutputItem,
@@ -80,6 +81,9 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false, searchAl
 
   const instructions = [];
   const input = [];
+  // Checkpoints ride the client's own history; they are lifted out of the replayed thinking and put
+  // back as context, so state the client compacted away returns on the next turn.
+  const carried = [];
   for (const item of messages) {
     if (item == null || typeof item !== "object") {
       throw new Error("messages must contain objects");
@@ -99,11 +103,15 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false, searchAl
         // Providers with thinking mode require their reasoning back verbatim on the next turn
         // (DeepSeek answers 400 otherwise), so it is replayed as a reasoning item with our own
         // wrapper and bookkeeping removed.
-        const reasoning = stripWrapper(stringValue(item, "reasoning_content"));
+        const fromReasoning = extractCheckpoints(stringValue(item, "reasoning_content"));
+        carried.push(...fromReasoning.blocks);
+        const reasoning = stripWrapper(fromReasoning.cleaned);
         if (reasoning !== "") {
           input.push({ type: "reasoning", content: [{ type: "reasoning_text", text: reasoning }] });
         }
-        const text = stripNotes(chatContentText(item.content));
+        const fromContent = extractCheckpoints(chatContentText(item.content));
+        carried.push(...fromContent.blocks);
+        const text = stripNotes(fromContent.cleaned);
         if (text !== "") input.push({ role: "assistant", content: text });
         if (Array.isArray(item.tool_calls)) {
           for (const [index, toolCall] of item.tool_calls.entries()) {
@@ -128,6 +136,15 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false, searchAl
     }
   }
   if (input.length === 0) input.push({ role: "user", content: "" });
+  if (carried.length > 0) {
+    // Appended at the tail. Instructions sit at the front of the prompt, and touching those would
+    // cost the entire cached prefix; de-duplicated so the same history yields the same bytes.
+    const unique = [...new Set(carried)];
+    input.push({
+      role: "developer",
+      content: `Context carried over from earlier turns:\n${unique.join("\n")}`,
+    });
+  }
 
   const out = {
     model: upstreamModel,
