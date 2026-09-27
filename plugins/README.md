@@ -54,3 +54,35 @@ for identical client input:
   because swapping tools mid-conversation invalidates the cache for that conversation.
 - **A broken plugin is skipped, not fatal.** Load and registration errors are logged and the proxy
   keeps serving.
+
+## Checkpoints: state that survives a compacted history
+
+A client that compacts its conversation drops old tool results, so a model forgets the document id
+it was given and starts over. The proxy supports one mechanism against that; **deciding whether to
+use it is the plugin's own call**, and the proxy only moves the data.
+
+A tool result may contain a `<checkpoint>…</checkpoint>` block:
+
+```js
+async run({ path }) {
+  const doc = await open(path);
+  return `opened ${doc.id}\n<checkpoint>${doc.id} = ${path} (${doc.pages} pages)</checkpoint>`;
+}
+```
+
+What the core does with it:
+
+- the loop lifts the block out of the tool result and hands it to the transport;
+- the transport writes it into the folded thinking block, **outside `<ignore>`** — a checkpoint is
+  content, not bookkeeping, so it is not stripped;
+- on the next request the proxy extracts any `<checkpoint>` from the replayed thinking or content
+  and re-appends it as a `developer` message, so the model gets it back.
+
+Rules for a plugin that emits one:
+
+- **Keep it small and stable.** The same situation must produce the same text, or the prompt prefix
+  changes and the cache is lost.
+- **It is appended at the tail**, never merged into `instructions`, for the same reason.
+- **Say only what cannot be re-derived cheaply.** A checkpoint exists because re-finding the
+  information is expensive; anything a tool can look up again belongs in the tool, not here.
+- **No secrets.** It travels through the client's history and is visible in its thinking panel.
