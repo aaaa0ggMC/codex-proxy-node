@@ -21,7 +21,18 @@ import { runAgent } from "./agent/loop.js";
 export class Server {
   #usageLock = Promise.resolve();
 
-  constructor({ provider, log, apiKey = "", webSearch = false, usageTTL = null, registry = null, maxTurns = 4, discardImages = 0 }) {
+  constructor({
+    provider,
+    log,
+    apiKey = "",
+    webSearch = false,
+    usageTTL = null,
+    registry = null,
+    maxTurns = 4,
+    discardImages = 0,
+    progress = false,
+    keepaliveMs = 15_000,
+  }) {
     this.provider = provider;
     this.log = log;
     this.apiKey = apiKey;
@@ -30,6 +41,8 @@ export class Server {
     this.registry = registry;
     this.maxTurns = maxTurns;
     this.discardImages = discardImages;
+    this.progress = progress;
+    this.keepaliveMs = keepaliveMs;
     this.usageCache = null;
     this.usageCacheAt = 0;
   }
@@ -269,9 +282,12 @@ export class Server {
 
   async #aggregate(req, res, request) {
     // Go through #agent so the non-streaming path gets the same loop settings as the streaming one.
-    const { agent } = this.#agent(req, res, request);
-    const events = agent;
-    return aggregateResponsesStream(events, request);
+    const { agent, stopKeepalive } = this.#agent(req, res, request);
+    try {
+      return await aggregateResponsesStream(agent, request);
+    } finally {
+      stopKeepalive();
+    }
   }
 
   // upstreamEvents returns the provider's Responses events, turning a non-2xx response into an
@@ -284,6 +300,7 @@ export class Server {
     const signal = this.#signal(res);
     return {
       signal,
+      ...this.#keepalive(res),
       agent: runAgent({
         stream: (payload, sig) => this.#upstreamEvents(payload, sig),
         request,
@@ -296,14 +313,28 @@ export class Server {
     };
   }
 
+  // A local tool can take seconds (rendering a PDF page, re-encoding a slide). Chat Completions has
+  // no progress channel, so at minimum the socket has to stay busy or a client gives up and closes
+  // the request. An SSE comment is the standard way to do that: every parser skips it.
+  #keepalive(res) {
+    if (this.keepaliveMs <= 0) return { stopKeepalive: () => {} };
+    const timer = setInterval(() => {
+      if (res.writableEnded || res.destroyed) return;
+      res.write(": keepalive\n\n");
+    }, this.keepaliveMs);
+    timer.unref?.();
+    return { stopKeepalive: () => clearInterval(timer) };
+  }
+
   async #streamResponses(req, res, request) {
-    const { agent } = this.#agent(req, res, request);
+    const { agent, stopKeepalive } = this.#agent(req, res, request);
 
     // Same eager first pull as the chat path, so an upstream refusal stays an HTTP status.
     let step;
     try {
       step = await agent.next();
     } catch (err) {
+      stopKeepalive();
       writeOpenAIError(res, err.status ?? 502, err.message);
       return;
     }
@@ -314,19 +345,25 @@ export class Server {
       while (!step.done) {
         if (res.writableEnded || res.destroyed) return;
         const event = step.value;
+        if (event.type === "codex_proxy.tool_start") {
+          step = await agent.next();
+          continue;
+        }
         res.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
         step = await agent.next();
       }
     } catch {
       res.end();
       return;
+    } finally {
+      stopKeepalive();
     }
     writeSSEDone(res);
     res.end();
   }
 
   async #streamChatCompletions(req, res, request, model, sendUsage) {
-    const { agent } = this.#agent(req, res, request);
+    const { agent, stopKeepalive } = this.#agent(req, res, request);
 
     // Pull the first event before writing anything, so an upstream refusal is still a plain HTTP
     // error instead of a half-written SSE stream.
@@ -334,6 +371,7 @@ export class Server {
     try {
       step = await agent.next();
     } catch (err) {
+      stopKeepalive();
       writeOpenAIError(res, err.status ?? 502, err.message);
       return;
     }
@@ -361,6 +399,16 @@ export class Server {
         switch (event.type) {
           case "response.output_text.delta":
             sendChunk([openAIChatDeltaChoice({ content: stringValue(event.data, "delta") }, null)], null);
+            break;
+          case "codex_proxy.tool_start":
+            // Opt-in: the only channel a chat client renders is the message itself, so visible
+            // progress means writing into the answer.
+            if (this.progress) {
+              sendChunk(
+                [openAIChatDeltaChoice({ content: `\n\n_[${stringValue(event.data, "name")}]_…\n\n` }, null)],
+                null,
+              );
+            }
             break;
           case "response.output_text.annotation.added": {
             const annotation = event.data.annotation;
@@ -399,6 +447,8 @@ export class Server {
     } catch {
       res.end();
       return;
+    } finally {
+      stopKeepalive();
     }
 
     sendChunk([openAIChatDeltaChoice({}, finishReason)], null);

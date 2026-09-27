@@ -17,6 +17,7 @@ test("parseFlags applies the documented defaults", () => {
     maxTurns: 4,
     discardImages: 0,
     config: "",
+    progress: false,
   });
 });
 

@@ -144,6 +144,12 @@ export async function* runAgent({ stream, request, registry, signal, maxTurns = 
     const outputs = [];
     for (const call of localCalls) {
       const callId = callIdOf(call);
+      // Tell the caller a tool is about to run. The transport decides whether that becomes visible
+      // progress or stays internal; either way the caller knows the gap is not a stall.
+      yield {
+        type: "codex_proxy.tool_start",
+        data: { type: "codex_proxy.tool_start", name: stringValue(call, "name"), call_id: callId },
+      };
       try {
         const output = await registry.call(stringValue(call, "name"), call.arguments, { signal });
         outputs.push({ type: "function_call_output", call_id: callId, output });

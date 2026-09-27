@@ -84,9 +84,11 @@ test("runAgent runs a local tool, feeds the result back, and hides the call", as
   const events = await collect(runAgent({ stream: fake.stream, request: { input: [], tools: undefined }, registry }));
 
   assert.deepEqual(events.map((e) => e.type), [
+    "codex_proxy.tool_start",
     "response.output_text.delta",
     "response.completed",
   ]);
+  assert.equal(events[0].data.name, "docs_read_page", "the caller is told a local tool is running");
   assert.ok(
     !events.some((e) => e.data?.item?.type === "function_call"),
     "a local tool call must never reach the client",

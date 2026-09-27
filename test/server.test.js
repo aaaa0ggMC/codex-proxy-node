@@ -5,6 +5,7 @@ import { Server } from "../src/server.js";
 import { CodexProvider } from "../src/providers/codex.js";
 import { createLoggerTo } from "../src/log.js";
 import { silentLog, startHttpServer, withEndpoints } from "../test-support/helpers.js";
+import { ToolRegistry } from "../src/agent/tools.js";
 
 const usagePayload = {
   plan_type: "plus",
@@ -392,5 +393,78 @@ test("the request log reports the bytes actually written", async () => {
     assert.match(finished, /status=200 bytes=11/, `unexpected log line: ${finished}`);
   } finally {
     await proxy.close();
+  }
+});
+
+test("a slow local tool keeps the stream alive and can report progress", async () => {
+  const upstream = await fakeUpstream({
+    events: [
+      {
+        type: "response.output_item.done",
+        data: { item: { type: "function_call", call_id: "c1", name: "docs__slow", arguments: "{}" } },
+      },
+      { type: "response.completed", data: { response: { id: "r1", status: "completed" } } },
+      { type: "response.output_text.delta", data: { delta: "done" } },
+      { type: "response.completed", data: { response: { id: "r2", status: "completed" } } },
+    ],
+  });
+  // Two turns: the tool call, then the answer. fakeUpstream replays one list, so drive it directly.
+  let turn = 0;
+  const scripted = {
+    async *events(request, signal) {
+      const list =
+        turn++ === 0
+          ? upstream.state.responses.length >= 0 && [
+              {
+                type: "response.output_item.done",
+                data: { item: { type: "function_call", call_id: "c1", name: "docs__slow", arguments: "{}" } },
+              },
+              { type: "response.completed", data: { response: { id: "r1", status: "completed" } } },
+            ]
+          : [
+              { type: "response.output_text.delta", data: { delta: "done" } },
+              { type: "response.completed", data: { response: { id: "r2", status: "completed" } } },
+            ];
+      for (const event of list) yield event;
+    },
+    async models() {
+      return [];
+    },
+    async usage() {
+      return null;
+    },
+  };
+
+  const registry = new ToolRegistry().register({
+    name: "docs",
+    namespace: true,
+    tools: [
+      {
+        name: "slow",
+        run: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 120));
+          return "page text";
+        },
+      },
+    ],
+  });
+  const proxy = await startHttpServer(
+    new Server({ provider: scripted, log: silentLog, usageTTL: 60, registry, keepaliveMs: 40, progress: true }).handler(),
+  );
+
+  try {
+    const resp = await chat(proxy.base, {
+      model: "gpt-5.5",
+      stream: true,
+      messages: [{ role: "user", content: "read it" }],
+    });
+    const text = await resp.text();
+    assert.match(text, /keepalive/, "the socket must stay busy while a local tool runs");
+    assert.match(text, /docs__slow/, "progress should be visible when enabled");
+    assert.ok(text.trimEnd().endsWith("data: [DONE]"));
+    assert.ok(!text.includes('"tool_calls"'), "the local tool call must stay hidden");
+  } finally {
+    await proxy.close();
+    await upstream.close();
   }
 });
