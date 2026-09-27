@@ -456,13 +456,13 @@ export function normalizeWebSearchTool(m) {
   return tool;
 }
 
-export function extractWebSearchIntent(raw, defaultWebSearch) {
+export function extractWebSearchIntent(raw, defaultWebSearch, modelWantsSearch = false) {
   if (typeof raw.web_search_options === "boolean" && !raw.web_search_options) {
     return { intent: false, options: {} };
   }
 
   const options = {};
-  let intent = defaultWebSearch;
+  let intent = defaultWebSearch || modelWantsSearch;
 
   const wsOptions = raw.web_search_options;
   if (wsOptions != null && typeof wsOptions === "object" && !Array.isArray(wsOptions)) {
