@@ -1,25 +1,30 @@
 {
   "default_provider": "codex",
-  "providers": {
-    "codex": {
+  "providers": [
+    {
+      "name": "codex",
       "type": "codex",
-      "enabled": true
+      "enabled": true,
+      "comment": "No key: this uses the ChatGPT login in auth.json. Point codex_home elsewhere to use a second account."
     },
-    "deepseek": {
-      "type": "openai",
+    {
+      "name": "deepseek",
+      "type": "openai-responses",
       "enabled": true,
       "base_url": "https://api.deepseek.com/v1",
       "api_key_env": "DEEPSEEK_API_KEY",
       "reasoning_effort": "low"
     },
-    "inline-key-example": {
-      "type": "openai",
+    {
+      "name": "deepseek",
+      "type": "openai-responses",
       "enabled": false,
-      "base_url": "https://api.example.com/v1",
-      "api_key": "sk-replace-me",
-      "reasoning_effort": "low"
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-second-account",
+      "comment": "Same name as the entry above: requests to deepseek/* fall over to this one, so two keys can back one namespace."
     },
-    "stepfun": {
+    {
+      "name": "stepfun",
       "type": "openai",
       "enabled": false,
       "base_url": "https://api.stepfun.ai/step_plan/v1",
@@ -27,11 +32,12 @@
       "model": "step-3.7-flash",
       "reasoning_effort": "low"
     },
-    "local": {
+    {
+      "name": "local",
       "type": "openai-responses",
       "enabled": false,
       "base_url": "http://127.0.0.1:8080/v1",
       "models": ["my-local-model"]
     }
-  }
+  ]
 }

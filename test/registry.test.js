@@ -125,3 +125,66 @@ test("a provider key may be inline, from the environment, or both", async () => 
   assert.equal(fallback.env, "", "a missing variable yields no key");
   assert.equal(fallback.both, "sk-fallback", "an empty variable must not shadow the inline key");
 });
+
+test("providers may be an array, and a shared name fails over", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "codex-array-"));
+  const file = path.join(dir, "config.json");
+  await writeFile(
+    file,
+    JSON.stringify({
+      default_provider: "deepseek",
+      providers: [
+        { name: "deepseek", type: "openai-responses", base_url: "https://primary.test/v1", api_key: "k1" },
+        { name: "deepseek", type: "openai-responses", base_url: "https://backup.test/v1", api_key: "k2" },
+        { name: "codex", type: "codex" },
+      ],
+    }),
+  );
+
+  const loaded = await loadProviderConfig(file);
+  assert.deepEqual(loaded.providers.map(([name]) => name), ["deepseek", "deepseek", "codex"]);
+
+  const seen = [];
+  const failing = {
+    id: "deepseek",
+    models: async () => [{ slug: "deepseek-flash", supported_in_api: true, visibility: "list" }],
+    async *events() {
+      throw Object.assign(new Error("key exhausted"), { status: 429 });
+    },
+    usage: async () => null,
+  };
+  const healthy = fakeProvider("deepseek", ["deepseek-flash"], seen);
+  const registry = new ProviderRegistry({
+    defaultProvider: "deepseek",
+    providers: [["deepseek", failing], ["deepseek", healthy]],
+  });
+
+  for await (const _ of registry.events({ model: "deepseek/deepseek-flash", input: [] })) {
+    // drain
+  }
+  assert.deepEqual(seen, [{ provider: "deepseek", model: "deepseek-flash" }], "the second entry served it");
+});
+
+test("a failure after the first event is not retried", async () => {
+  const halfBroken = {
+    id: "x",
+    models: async () => [],
+    async *events() {
+      yield { type: "response.output_text.delta", data: { delta: "partial" } };
+      throw new Error("stream died");
+    },
+    usage: async () => null,
+  };
+  const seen = [];
+  const registry = new ProviderRegistry({
+    defaultProvider: "x",
+    providers: [["x", halfBroken], ["x", fakeProvider("x", [], seen)]],
+  });
+
+  const events = [];
+  await assert.rejects(async () => {
+    for await (const event of registry.events({ model: "x/m", input: [] })) events.push(event);
+  }, /stream died/);
+  assert.equal(events.length, 1, "the partial answer was already streamed");
+  assert.deepEqual(seen, [], "the next provider must not replay the answer");
+});

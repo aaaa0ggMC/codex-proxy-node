@@ -6,6 +6,12 @@ A small local OpenAI-compatible proxy backed by your existing Codex CLI ChatGPT 
 OpenAI-compatible client -> http://127.0.0.1:6769/v1 -> ChatGPT Codex backend
 ```
 
+`providers` may be an object keyed by name or an array where each entry carries `name`; both forms
+behave the same. Entries that share a name form one namespace and are tried in order, so two keys
+for the same service can back a single prefix — a request falls over to the next entry only if
+nothing has been streamed yet. `codex` needs no key (it uses the ChatGPT login), but a `codex_home`
+can point at another account.
+
 This is the Node.js port of [aaaa0ggMC/codex-proxy](https://github.com/aaaa0ggMC/codex-proxy)
 (itself a fork of [Max-Leopold/codex-proxy](https://github.com/Max-Leopold/codex-proxy)).
 It keeps the same routes, flags and behaviour, but is a single dependency-free ESM codebase, which
