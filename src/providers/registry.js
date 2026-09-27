@@ -69,8 +69,10 @@ export async function loadProviderConfig(file, { log, tokens = null, env = proce
   const providers = [];
   for (const cfg of entries) {
     if (cfg?.enabled === false) continue;
-    const name = cfg?.name ?? cfg?.type;
-    if (name == null) {
+    // An empty name means "use the type", so `{ name: "", type: "codex" }` is valid and lands in
+    // the codex namespace rather than an unnamed one.
+    const name = typeof cfg?.name === "string" && cfg.name.trim() !== "" ? cfg.name.trim() : cfg?.type;
+    if (typeof name !== "string" || name === "") {
       log?.error("provider skipped: no name", { type: cfg?.type });
       continue;
     }

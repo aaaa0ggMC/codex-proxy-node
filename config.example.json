@@ -2,10 +2,10 @@
   "default_provider": "codex",
   "providers": [
     {
-      "name": "codex",
+      "name": "",
       "type": "codex",
       "enabled": true,
-      "comment": "No key: this uses the ChatGPT login in auth.json. Point codex_home elsewhere to use a second account."
+      "comment": "An empty name falls back to the type, so this lands in the codex namespace. No key: it uses the ChatGPT login in auth.json; codex_home can point at a second account."
     },
     {
       "name": "deepseek",
