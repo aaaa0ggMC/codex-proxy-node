@@ -80,8 +80,17 @@ export function mergeTools(clientTools, localTools) {
 
 // runAgent yields provider events for the caller to forward downstream. Local tool calls are
 // swallowed (the client must never see them), executed, and replayed back to the provider.
-export async function* runAgent({ stream, request, registry, signal, maxTurns = 4, log = null, discardImages = 0 }) {
-  const localTools = registry == null ? [] : registry.definitions();
+export async function* runAgent({
+  stream,
+  request,
+  registry,
+  signal,
+  maxTurns = 4,
+  log = null,
+  discardImages = 0,
+  disabledPlugins = [],
+}) {
+  const localTools = registry == null ? [] : registry.definitions({ exclude: disabledPlugins });
   const localNames = new Set(localTools.map((tool) => tool.name));
   const tools = mergeTools(request.tools, localTools);
   const base = tools.length > 0 ? { ...request, tools } : request;

@@ -21,6 +21,7 @@ import { usageReport, usageText, usageValue } from "./usage.js";
 import { runAgent } from "./agent/loop.js";
 import { note } from "./notes.js";
 import { handleAdmin } from "./admin.js";
+import { applyModuleSwitches } from "./modules.js";
 
 export class Server {
   #usageLock = Promise.resolve();
@@ -284,6 +285,13 @@ export class Server {
       return;
     }
 
+    // <disable_module> in the first user message turns a module off for this conversation. The tag
+    // is stripped either way, so the upstream model never sees the control syntax.
+    const disabledPlugins = applyModuleSwitches(raw.messages);
+    if (disabledPlugins.size > 0) {
+      this.log.info("modules disabled by switch", { modules: [...disabledPlugins] });
+    }
+
     let request;
     let stream;
     try {
@@ -295,11 +303,11 @@ export class Server {
 
     const model = stringValue(raw, "model");
     if (stream) {
-      await this.#streamChatCompletions(req, res, request, model, includeUsage(raw));
+      await this.#streamChatCompletions(req, res, request, model, includeUsage(raw), disabledPlugins);
       return;
     }
     try {
-      const agg = await this.#aggregate(req, res, request);
+      const agg = await this.#aggregate(req, res, request, disabledPlugins);
       writeJSON(res, 200, chatCompletionFromAggregate(agg, model));
     } catch (err) {
       writeOpenAIError(res, 502, err.message);
@@ -412,9 +420,9 @@ export class Server {
     }
   }
 
-  async #aggregate(req, res, request) {
+  async #aggregate(req, res, request, disabledPlugins = []) {
     // Go through #agent so the non-streaming path gets the same loop settings as the streaming one.
-    const { agent, stopKeepalive } = this.#agent(req, res, request);
+    const { agent, stopKeepalive } = this.#agent(req, res, request, disabledPlugins);
     try {
       return await aggregateResponsesStream(agent, request);
     } finally {
@@ -428,7 +436,7 @@ export class Server {
     return this.provider.events(request, signal);
   }
 
-  #agent(req, res, request) {
+  #agent(req, res, request, disabledPlugins = []) {
     const signal = this.#signal(res);
     return {
       signal,
@@ -441,6 +449,7 @@ export class Server {
         log: this.log,
         maxTurns: this.maxTurns,
         discardImages: this.discardImages,
+        disabledPlugins,
       }),
     };
   }
@@ -494,8 +503,8 @@ export class Server {
     res.end();
   }
 
-  async #streamChatCompletions(req, res, request, model, sendUsage) {
-    const { agent, stopKeepalive } = this.#agent(req, res, request);
+  async #streamChatCompletions(req, res, request, model, sendUsage, disabledPlugins = []) {
+    const { agent, stopKeepalive } = this.#agent(req, res, request, disabledPlugins);
 
     // Pull the first event before writing anything, so an upstream refusal is still a plain HTTP
     // error instead of a half-written SSE stream.

@@ -72,9 +72,10 @@ export class ToolRegistry {
   }
 
   // definitions returns the Responses API tool declarations for every registered tool.
-  definitions() {
+  definitions({ exclude = [] } = {}) {
+    const skip = new Set(exclude);
     return [...this.#tools.values()]
-      .filter((tool) => this.isEnabled(tool.plugin))
+      .filter((tool) => this.isEnabled(tool.plugin) && !skip.has(tool.plugin))
       .map((tool) => ({
         type: "function",
         name: tool.name,

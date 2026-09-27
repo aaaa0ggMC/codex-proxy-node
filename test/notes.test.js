@@ -69,3 +69,25 @@ test("a replayed thinking block never reaches the model", () => {
   const payload = JSON.stringify(request);
   assert.ok(!payload.includes("<ignore"), "no marker may survive translation");
 });
+
+test("a disable_module switch is honoured once and never reaches the model", async () => {
+  const { applyModuleSwitches } = await import("../src/modules.js");
+  const messages = [
+    { role: "system", content: "be terse" },
+    { role: "user", content: [{ type: "text", text: "look at the deck\n<disable_module>docs</disable_module>" }] },
+    { role: "assistant", content: "ok <disable_module name=\"other\" />" },
+  ];
+
+  const disabled = applyModuleSwitches(messages);
+  assert.deepEqual([...disabled], ["docs"], "only the first user message carries the switch");
+  assert.ok(!messages[1].content[0].text.includes("disable_module"), "the tag is removed");
+  assert.equal(messages[1].content[0].text, "look at the deck");
+});
+
+test("both switch spellings are understood", async () => {
+  const { extractModuleSwitches } = await import("../src/modules.js");
+  assert.deepEqual(extractModuleSwitches(`<disable_module name="docs" />`).modules, ["docs"]);
+  assert.deepEqual(extractModuleSwitches(`<disable_module>stepfun</disable_module>`).modules, ["stepfun"]);
+  assert.deepEqual(extractModuleSwitches(`<disable_module docs />`).modules, ["docs"]);
+  assert.equal(extractModuleSwitches("nothing here").text, "nothing here");
+});
