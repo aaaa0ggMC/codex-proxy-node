@@ -5,12 +5,25 @@ export const defaultPort = 6769;
 export const apiKeyEnv = "CODEX_PROXY_API_KEY";
 export const webSearchEnv = "CODEX_PROXY_WEB_SEARCH";
 
+const providerEnvs = {
+  provider: "CODEX_PROXY_PROVIDER",
+  upstream: "CODEX_PROXY_UPSTREAM",
+  "upstream-key": "CODEX_PROXY_UPSTREAM_KEY",
+  "upstream-model": "CODEX_PROXY_UPSTREAM_MODEL",
+  "reasoning-effort": "CODEX_PROXY_REASONING_EFFORT",
+};
+
 const flagSpec = {
   host: { type: "string", fallback: defaultHost, help: "host/interface to listen on" },
   port: { type: "int", fallback: defaultPort, help: "port to listen on" },
   "codex-home": { type: "string", fallback: "", help: "Codex home directory; defaults to CODEX_HOME or ~/.codex" },
   "api-key": { type: "string", fallback: "", help: "API key required as Authorization bearer token; defaults to CODEX_PROXY_API_KEY" },
   "web-search": { type: "bool", fallback: false, help: "always enable web search tool for requests; defaults to CODEX_PROXY_WEB_SEARCH" },
+  provider: { type: "string", fallback: "codex", help: "upstream provider: codex or openai; defaults to CODEX_PROXY_PROVIDER" },
+  upstream: { type: "string", fallback: "", help: "base URL for the openai provider, e.g. https://api.stepfun.ai/step_plan/v1" },
+  "upstream-key": { type: "string", fallback: "", help: "bearer token for the openai provider; defaults to CODEX_PROXY_UPSTREAM_KEY" },
+  "upstream-model": { type: "string", fallback: "", help: "force a model id for the openai provider instead of passing the client's through" },
+  "reasoning-effort": { type: "string", fallback: "", help: "reasoning effort sent to the openai provider (low, medium, high)" },
 };
 
 export class HelpRequested extends Error {}
@@ -104,6 +117,17 @@ export function parseFlags(args, env = process.env) {
   if (!cfg["web-search"] && env[webSearchEnv]) {
     cfg["web-search"] = parseBoolEnv(env[webSearchEnv]);
   }
+  for (const [name, envName] of Object.entries(providerEnvs)) {
+    if (cfg[name] === "" && env[envName] !== undefined) cfg[name] = env[envName];
+  }
+
+  const provider = cfg.provider.toLowerCase();
+  if (provider !== "codex" && provider !== "openai") {
+    throw new Error(`unknown --provider ${JSON.stringify(cfg.provider)}; use codex or openai`);
+  }
+  if (provider === "openai" && cfg.upstream === "") {
+    throw new Error("--provider openai requires --upstream or CODEX_PROXY_UPSTREAM");
+  }
 
   return {
     host: cfg.host,
@@ -111,6 +135,11 @@ export function parseFlags(args, env = process.env) {
     codexHome: cfg["codex-home"],
     apiKey: cfg["api-key"],
     webSearch: cfg["web-search"],
+    provider,
+    upstream: cfg.upstream,
+    upstreamKey: cfg["upstream-key"],
+    upstreamModel: cfg["upstream-model"],
+    reasoningEffort: cfg["reasoning-effort"],
   };
 }
 

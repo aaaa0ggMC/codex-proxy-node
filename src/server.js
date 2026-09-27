@@ -14,15 +14,15 @@ import {
   openAIErrorResponse,
   openAIModelsResponse,
 } from "./schema.js";
-import { readStreamEvents, setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
+import { setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
 import { usageReport, usageText, usageValue } from "./usage.js";
 import { runAgent } from "./agent/loop.js";
 
 export class Server {
   #usageLock = Promise.resolve();
 
-  constructor({ codex, log, apiKey = "", webSearch = false, usageTTL = null, registry = null }) {
-    this.codex = codex;
+  constructor({ provider, log, apiKey = "", webSearch = false, usageTTL = null, registry = null }) {
+    this.provider = provider;
     this.log = log;
     this.apiKey = apiKey;
     this.webSearch = webSearch;
@@ -148,7 +148,7 @@ export class Server {
 
   async #handleModels(req, res) {
     try {
-      const models = await this.codex.models(this.#signal(res));
+      const models = await this.provider.models(this.#signal(res));
       writeJSON(res, 200, openAIModelsResponse(models));
     } catch (err) {
       writeOpenAIError(res, 502, err.message);
@@ -279,13 +279,7 @@ export class Server {
   // upstreamEvents returns the provider's Responses events, turning a non-2xx response into an
   // error that still carries the upstream status so the handler can mirror it.
   async #upstreamEvents(request, signal) {
-    const resp = await this.codex.streamResponses(request, signal);
-    if (!resp.ok) {
-      const err = await upstreamError(resp);
-      err.status = resp.status;
-      throw err;
-    }
-    return readStreamEvents(resp.body);
+    return this.provider.events(request, signal);
   }
 
   #agent(req, res, request) {
@@ -302,24 +296,25 @@ export class Server {
   }
 
   async #streamResponses(req, res, request) {
-    let resp;
+    const { agent } = this.#agent(req, res, request);
+
+    // Same eager first pull as the chat path, so an upstream refusal stays an HTTP status.
+    let step;
     try {
-      resp = await this.codex.streamResponses(request, this.#signal(res));
+      step = await agent.next();
     } catch (err) {
-      writeOpenAIError(res, 502, err.message);
-      return;
-    }
-    if (!resp.ok) {
-      writeOpenAIError(res, resp.status, (await upstreamError(resp)).message);
+      writeOpenAIError(res, err.status ?? 502, err.message);
       return;
     }
 
     setSSEHeaders(res);
     res.writeHead(200);
     try {
-      for await (const chunk of resp.body) {
+      while (!step.done) {
         if (res.writableEnded || res.destroyed) return;
-        res.write(chunk);
+        const event = step.value;
+        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+        step = await agent.next();
       }
     } catch {
       res.end();
@@ -443,25 +438,6 @@ export async function decodeJSONMap(req) {
     throw new Error("invalid JSON body: expected a JSON object");
   }
   return parsed;
-}
-
-async function upstreamError(resp) {
-  const body = await resp.text();
-  let message = body.trim();
-  try {
-    const payload = JSON.parse(body);
-    const detail = stringValue(payload, "detail");
-    if (detail !== "") {
-      message = detail;
-    } else if (payload?.error != null && typeof payload.error === "object") {
-      const inner = stringValue(payload.error, "message");
-      if (inner !== "") message = inner;
-    }
-  } catch {
-    // Keep the raw body as the message.
-  }
-  if (message === "") message = `${resp.status} ${resp.statusText}`.trim();
-  return new Error(`Codex upstream returned HTTP ${resp.status}: ${message}`);
 }
 
 export function includeUsage(raw) {

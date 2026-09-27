@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { Server } from "../src/server.js";
-import { CodexClient } from "../src/codex.js";
+import { CodexProvider } from "../src/providers/codex.js";
 import { createLoggerTo } from "../src/log.js";
 import { silentLog, startHttpServer, withEndpoints } from "../test-support/helpers.js";
 
@@ -87,10 +87,10 @@ async function fakeUpstream({ events = textEvents("pong") } = {}) {
 }
 
 async function startProxy({ usageTTL = 60, apiKey = "" } = {}) {
-  const codex = new CodexClient({
+  const provider = new CodexProvider({
     tokens: { token: async () => ({ accessToken: "tok", accountId: "acct-1" }) },
   });
-  const server = new Server({ codex, log: silentLog, apiKey, usageTTL });
+  const server = new Server({ provider, log: silentLog, apiKey, usageTTL });
   const proxy = await startHttpServer(server.handler());
   return { ...proxy, server };
 }
@@ -380,10 +380,10 @@ test("the request log reports the bytes actually written", async () => {
       },
     }),
   );
-  const codex = new CodexClient({
+  const provider = new CodexProvider({
     tokens: { token: async () => ({ accessToken: "tok", accountId: "acct-1" }) },
   });
-  const server = new Server({ codex, log, usageTTL: 60 });
+  const server = new Server({ provider, log, usageTTL: 60 });
   const proxy = await startHttpServer(server.handler());
   try {
     await fetch(`${proxy.base}/healthz`);

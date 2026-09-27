@@ -1,4 +1,4 @@
-import { boolValue, defaultedString, randomHex, stringValue } from "./util.js";
+import { boolValue, defaultedString, stableId, stringValue } from "./util.js";
 import {
   newOpenAIResponse,
   openAIOutputItem,
@@ -98,8 +98,8 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false } = {}) {
         const text = chatContentText(item.content);
         if (text !== "") input.push({ role: "assistant", content: text });
         if (Array.isArray(item.tool_calls)) {
-          for (const toolCall of item.tool_calls) {
-            const call = responsesFunctionCallFromChat(toolCall);
+          for (const [index, toolCall] of item.tool_calls.entries()) {
+            const call = responsesFunctionCallFromChat(toolCall, index);
             if (call != null) input.push(call);
           }
         }
@@ -313,7 +313,7 @@ function audioPartURL(part) {
   return "";
 }
 
-export function responsesFunctionCallFromChat(toolCall) {
+export function responsesFunctionCallFromChat(toolCall, index = 0) {
   if (toolCall == null || typeof toolCall !== "object" || stringValue(toolCall, "type") !== "function") {
     return null;
   }
@@ -321,7 +321,9 @@ export function responsesFunctionCallFromChat(toolCall) {
   if (fn == null || typeof fn !== "object") return null;
   const name = stringValue(fn, "name");
   if (name === "") return null;
-  const callId = stringValue(toolCall, "id") || "call_" + randomHex(8);
+  // A client that omits tool call ids would otherwise get a fresh random id on every request,
+  // changing the prompt prefix each time. Derive it from the position and content instead.
+  const callId = stringValue(toolCall, "id") || stableId("call", String(index), name, stringValue(fn, "arguments"));
   const args = stringValue(fn, "arguments") || "{}";
   return { type: "function_call", call_id: callId, name, arguments: args };
 }

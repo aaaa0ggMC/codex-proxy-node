@@ -9,7 +9,34 @@ test("parseFlags applies the documented defaults", () => {
     codexHome: "",
     apiKey: "",
     webSearch: false,
+    provider: "codex",
+    upstream: "",
+    upstreamKey: "",
+    upstreamModel: "",
+    reasoningEffort: "",
   });
+});
+
+test("parseFlags wires up an OpenAI-compatible provider", () => {
+  const cfg = parseFlags(["--provider", "openai", "--upstream", "https://api.stepfun.ai/step_plan/v1"], {});
+  assert.equal(cfg.provider, "openai");
+  assert.equal(cfg.upstream, "https://api.stepfun.ai/step_plan/v1");
+
+  const fromEnv = parseFlags([], {
+    CODEX_PROXY_PROVIDER: "openai",
+    CODEX_PROXY_UPSTREAM: "https://api.deepseek.com/v1",
+    CODEX_PROXY_UPSTREAM_KEY: "sk-test",
+    CODEX_PROXY_UPSTREAM_MODEL: "deepseek-chat",
+    CODEX_PROXY_REASONING_EFFORT: "low",
+  });
+  assert.equal(fromEnv.upstreamKey, "sk-test");
+  assert.equal(fromEnv.upstreamModel, "deepseek-chat");
+  assert.equal(fromEnv.reasoningEffort, "low");
+});
+
+test("parseFlags rejects a provider it cannot build", () => {
+  assert.throws(() => parseFlags(["--provider", "openai"], {}), /requires --upstream/);
+  assert.throws(() => parseFlags(["--provider", "gemini"], {}), /unknown --provider/);
 });
 
 test("parseFlags accepts both dashes and both value forms", () => {

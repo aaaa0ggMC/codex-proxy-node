@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import dns from "node:dns";
 import http from "node:http";
+import path from "node:path";
 import { HelpRequested, parseFlags, usageText } from "./config.js";
 import { TokenSource } from "./auth.js";
-import { CodexClient } from "./codex.js";
+import { createProvider } from "./providers/index.js";
 import { Server } from "./server.js";
 import { usageTTLFromEnv } from "./usage.js";
 import { createLoggerTo } from "./log.js";
+import { buildRegistry, loadPlugins } from "./plugins/loader.js";
 
 // Prefer IPv4 when resolving the upstream. Go's dialer does happy-eyeballs and falls back on its
 // own, but Node connects to the first address DNS hands back; on dual-stack and fake-IP (TUN)
@@ -15,7 +17,7 @@ import { createLoggerTo } from "./log.js";
 // NODE_OPTIONS=--dns-result-order=verbatim if your host really is IPv6-only.
 dns.setDefaultResultOrder("ipv4first");
 
-function main(argv) {
+async function main(argv) {
   let cfg;
   try {
     cfg = parseFlags(argv);
@@ -32,13 +34,22 @@ function main(argv) {
 
   const log = createLoggerTo(process.stderr);
   const tokens = new TokenSource({ codexHome: cfg.codexHome });
-  const codex = new CodexClient({ tokens });
+  const provider = createProvider(cfg, { tokens });
+
+  // Plugins are discovered once, at start. Reloading them mid-flight would change the tool
+  // declarations and so invalidate every conversation's cached prompt prefix.
+  const pluginsDir = path.join(import.meta.dirname, "..", "plugins");
+  const registry = buildRegistry(await loadPlugins(pluginsDir, { log }), { log });
+  const toolCount = registry.names().size;
+  if (toolCount > 0) log.info("plugins loaded", { tools: toolCount });
+
   const server = new Server({
-    codex,
+    provider,
     log,
     apiKey: cfg.apiKey,
     webSearch: cfg.webSearch,
     usageTTL: usageTTLFromEnv(),
+    registry,
   });
 
   const httpServer = http.createServer(server.handler());
@@ -57,4 +68,4 @@ function main(argv) {
   });
 }
 
-main(process.argv.slice(2));
+await main(process.argv.slice(2));

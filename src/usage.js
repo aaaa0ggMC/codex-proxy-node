@@ -1,5 +1,4 @@
-import { clampPercent, round2, stringValue, truncate } from "./util.js";
-import { endpoints } from "./endpoints.js";
+import { clampPercent, round2, stringValue } from "./util.js";
 
 // The Codex backend exposes the same numbers the CLI shows in /status: a short metering window
 // (5 hours on the current plans), a long one (a week) and optional credits. The proxy asks the
@@ -16,26 +15,6 @@ export function usageTTLFromEnv(env = process.env) {
   const seconds = Number.parseInt(value.trim(), 10);
   if (!Number.isFinite(seconds) || seconds < 0) return defaultUsageTTLSeconds;
   return seconds;
-}
-
-// Usage asks the Codex backend for the current rate limit state.
-export async function fetchUsage(client, signal) {
-  const token = await client.tokens.token(signal);
-  const resp = await fetch(endpoints.usageURL, {
-    headers: { ...client.authHeaders(token), Accept: "application/json" },
-    signal,
-  });
-  const body = await resp.text();
-  if (!resp.ok) {
-    throw new Error(`Codex usage request failed: HTTP ${resp.status}: ${truncate(body, 300)}`);
-  }
-  let raw;
-  try {
-    raw = JSON.parse(body);
-  } catch (err) {
-    throw new Error(`decode Codex usage response: ${err.message}`);
-  }
-  return normalizeUsage(raw, new Date());
 }
 
 function asNumber(v) {
@@ -243,7 +222,10 @@ export async function usageReport(server, refresh, signal) {
     }
 
     try {
-      const report = await fetchUsage(server.codex, signal);
+      const report = await server.provider.usage(signal);
+      if (report == null) {
+        throw new Error("the configured provider does not report usage");
+      }
       server.usageCache = report;
       server.usageCacheAt = Date.now();
       return { report, error: null };
