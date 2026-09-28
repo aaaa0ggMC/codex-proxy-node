@@ -600,8 +600,16 @@ export class Server {
         if (typeof event.type === "string" && event.type.startsWith("response.web_search_call.")) {
           openReasoning();
           const phase = event.type.slice("response.web_search_call.".length);
+          // Label the call: without it several searches in flight look like one queue, and there is
+          // no way to tell serial from interleaved.
+          const label = event.data?.output_index ?? event.data?.item_id?.slice(-4) ?? "";
           sendChunk(
-            [openAIChatDeltaChoice({ reasoning_content: note(`web search: ${phase}`) }, null)],
+            [
+              openAIChatDeltaChoice(
+                { reasoning_content: note(`web search${label === "" ? "" : ` ${label}`}: ${phase}`) },
+                null,
+              ),
+            ],
             null,
           );
           step = await agent.next();
