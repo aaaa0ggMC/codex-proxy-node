@@ -542,8 +542,8 @@ test("a hosted web search is visible on the reasoning channel", async () => {
       .map((line) => JSON.parse(line.slice(6)).choices?.[0]?.delta ?? {});
 
     const reasoning = deltas.map((d) => d.reasoning_content ?? "").join("");
-    assert.match(reasoning, /web search: searching/, `expected a search note in ${reasoning}`);
-    assert.match(reasoning, /web search: completed/);
+    assert.match(reasoning, /web search 1: searching/, `expected a numbered search note in ${reasoning}`);
+    assert.match(reasoning, /web search 1: completed/);
     assert.ok(reasoning.includes("<ignore>"), "progress is bookkeeping, not content");
     assert.equal(deltas.map((d) => d.content ?? "").join(""), "the answer");
   } finally {

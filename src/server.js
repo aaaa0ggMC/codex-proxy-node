@@ -573,6 +573,14 @@ export class Server {
     // could equally be the provider never sending one or us dropping it.
     const eventTypes = new Map();
     const tally = (type) => eventTypes.set(type, (eventTypes.get(type) ?? 0) + 1);
+    // Search numbers are ours, not the backend's: output_index counts every output item, so using
+    // it directly makes two searches look like #1 and #3 and invites a hunt for missing ones.
+    const searchNumbers = new Map();
+    const searchNumber = (event) => {
+      const key = event.data?.item_id ?? `#${event.data?.output_index ?? 0}`;
+      if (!searchNumbers.has(key)) searchNumbers.set(key, searchNumbers.size + 1);
+      return searchNumbers.get(key);
+    };
 
     // Everything the client should fold away goes inside one <th>: the model's own thinking as
     // <mth>, our progress notes as <ignore>. The block is opened lazily and closed as soon as
@@ -600,13 +608,12 @@ export class Server {
         if (typeof event.type === "string" && event.type.startsWith("response.web_search_call.")) {
           openReasoning();
           const phase = event.type.slice("response.web_search_call.".length);
-          // Label the call: without it several searches in flight look like one queue, and there is
-          // no way to tell serial from interleaved.
-          const label = event.data?.output_index ?? event.data?.item_id?.slice(-4) ?? "";
+          // Labelled so serial and interleaved searches are distinguishable, numbered so the
+          // sequence reads 1, 2, 3.
           sendChunk(
             [
               openAIChatDeltaChoice(
-                { reasoning_content: note(`web search${label === "" ? "" : ` ${label}`}: ${phase}`) },
+                { reasoning_content: note(`web search ${searchNumber(event)}: ${phase}`) },
                 null,
               ),
             ],
