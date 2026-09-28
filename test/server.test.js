@@ -401,7 +401,7 @@ test("a slow local tool keeps the stream alive and can report progress", async (
     events: [
       {
         type: "response.output_item.done",
-        data: { item: { type: "function_call", call_id: "c1", name: "docs__slow", arguments: "{}" } },
+        data: { item: { type: "function_call", call_id: "c1", name: "proxy_docs_slow", arguments: "{}" } },
       },
       { type: "response.completed", data: { response: { id: "r1", status: "completed" } } },
       { type: "response.output_text.delta", data: { delta: "done" } },
@@ -417,7 +417,7 @@ test("a slow local tool keeps the stream alive and can report progress", async (
           ? upstream.state.responses.length >= 0 && [
               {
                 type: "response.output_item.done",
-                data: { item: { type: "function_call", call_id: "c1", name: "docs__slow", arguments: "{}" } },
+                data: { item: { type: "function_call", call_id: "c1", name: "proxy_docs_slow", arguments: "{}" } },
               },
               { type: "response.completed", data: { response: { id: "r1", status: "completed" } } },
             ]
@@ -461,7 +461,7 @@ test("a slow local tool keeps the stream alive and can report progress", async (
     const text = await resp.text();
     assert.match(text, /keepalive/, "the socket must stay busy while a local tool runs");
     assert.match(text, /<ignore>/, "progress rides the reasoning channel, tagged for removal");
-    assert.match(text, /docs__slow/);
+    assert.match(text, /proxy_docs_slow/);
     assert.ok(text.trimEnd().endsWith("data: [DONE]"));
     assert.ok(!text.includes('"tool_calls"'), "the local tool call must stay hidden");
   } finally {
@@ -474,7 +474,7 @@ test("model reasoning and progress share one folded <th> block", async () => {
   const provider = {
     async *events() {
       yield { type: "response.reasoning_summary_text.delta", data: { delta: "weighing options. " } };
-      yield { type: "codex_proxy.tool_start", data: { name: "docs__open", arguments: '{"path":"/tmp/a.pptx"}' } };
+      yield { type: "codex_proxy.tool_start", data: { name: "proxy_docs_open", arguments: '{"path":"/tmp/a.pptx"}' } };
       yield { type: "response.reasoning_summary_text.delta", data: { delta: "now reading." } };
       yield { type: "response.output_text.delta", data: { delta: "the answer" } };
       yield { type: "response.completed", data: { response: { id: "r", status: "completed" } } };
@@ -504,7 +504,7 @@ test("model reasoning and progress share one folded <th> block", async () => {
     const reasoning = deltas.map((d) => d.reasoning_content ?? "").join("");
     assert.equal(
       reasoning,
-      '<th><mth>weighing options. <ignore>docs__open(path=/tmp/a.pptx)</ignore>now reading.</mth></th>',
+      '<th><mth>weighing options. <ignore>proxy_docs_open(path=/tmp/a.pptx)</ignore>now reading.</mth></th>',
     );
     assert.equal(deltas.map((d) => d.content ?? "").join(""), "the answer");
     assert.ok(!/answer/.test(reasoning), "the answer must not leak into the thinking block");

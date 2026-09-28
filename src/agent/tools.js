@@ -17,9 +17,9 @@ export class ToolRegistry {
     for (const tool of plugin.tools ?? []) {
       if (stringValue(tool, "name") === "") throw new Error(`plugin ${name} has a tool without a name`);
       if (typeof tool.run !== "function") throw new Error(`tool ${tool.name} has no run()`);
-      // Namespacing is opt-in because a plugin's tool names are part of the prompt, and only the
-      // plugin author knows whether it wants to own a short, model-friendly name.
-      const toolName = plugin.namespace === true ? `${name}__${tool.name}` : tool.name;
+      // Every tool carries its plugin's name by default, so a model can tell who owns what and two
+      // plugins cannot collide by accident. A plugin that wants bare names opts out explicitly.
+      const toolName = plugin.namespace === false ? tool.name : `proxy_${name}_${tool.name}`;
       if (this.#tools.has(toolName)) {
         throw new Error(`duplicate tool ${JSON.stringify(toolName)}; set namespace: true on the plugin`);
       }

@@ -65,47 +65,47 @@ async function fixtureDeck() {
 test("the docs plugin opens, searches and reads pages as text plus images", async () => {
   const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
   const names = [...registry.names()];
-  for (const tool of ["docs__list", "docs__open", "docs__read_page", "docs__search"]) {
+  for (const tool of ["proxy_docs_list", "proxy_docs_open", "proxy_docs_read_page", "proxy_docs_search"]) {
     assert.ok(names.includes(tool), `expected ${tool} in ${names.join(", ")}`);
   }
 
   const file = await fixtureDeck();
-  const opened = await registry.call("docs__open", JSON.stringify({ path: file }));
+  const opened = await registry.call("proxy_docs_open", JSON.stringify({ path: file }));
   const docId = opened.split("\n")[0].split(" ")[1];
   assert.match(opened, /mini\.pptx \(pptx, 2 slides/);
 
-  const listed = await registry.call("docs__list", "{}");
+  const listed = await registry.call("proxy_docs_list", "{}");
   assert.match(listed, /mini\.pptx/);
 
   // The file name is accepted as a reference too, not just the id.
-  const hits = await registry.call("docs__search", JSON.stringify({ doc: "mini.pptx", query: "revenue" }));
+  const hits = await registry.call("proxy_docs_search", JSON.stringify({ doc: "mini.pptx", query: "revenue" }));
   assert.match(hits, /slide 2:/);
 
-  const page = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 2 }));
+  const page = await registry.call("proxy_docs_read_page", JSON.stringify({ doc: docId, page: 2 }));
   assert.match(page[0].text, /Widget revenue grew 32 percent/);
   assert.equal(page.filter((part) => part.type === "input_image").length, 1);
   assert.match(page[1].image_url, /^data:image\//);
 
-  const textOnly = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 2, images: false }));
+  const textOnly = await registry.call("proxy_docs_read_page", JSON.stringify({ doc: docId, page: 2, images: false }));
   assert.equal(textOnly.length, 1);
 
   // A model that quotes only the hash (no "doc_" prefix) must still resolve.
   const hashOnly = docId.replace(/^doc_/, "");
-  const viaHash = await registry.call("docs__read_page", JSON.stringify({ doc: hashOnly, page: 1 }));
+  const viaHash = await registry.call("proxy_docs_read_page", JSON.stringify({ doc: hashOnly, page: 1 }));
   assert.match(viaHash[0].text, /Intro to widgets/);
 });
 
 test("the docs plugin rejects a page outside the document", async () => {
   const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
   const file = await fixtureDeck();
-  const opened = await registry.call("docs__open", JSON.stringify({ path: file }));
+  const opened = await registry.call("proxy_docs_open", JSON.stringify({ path: file }));
   const docId = opened.split("\n")[0].split(" ")[1];
   await assert.rejects(
-    registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 9 })),
+    registry.call("proxy_docs_read_page", JSON.stringify({ doc: docId, page: 9 })),
     /page must be an integer between 1 and 2/,
   );
   await assert.rejects(
-    registry.call("docs__search", JSON.stringify({ doc: "nope.pptx", query: "x" })),
+    registry.call("proxy_docs_search", JSON.stringify({ doc: "nope.pptx", query: "x" })),
     /no open document matches .*; open documents: /,
   );
 });
@@ -123,7 +123,7 @@ test("an inline attachment becomes an open document with a content-derived id", 
   assert.equal(first, second, "the same bytes must produce the same descriptor for the prompt cache");
 
   const docId = first.split("\n")[0].split(" ").pop();
-  const page = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 1 }));
+  const page = await registry.call("proxy_docs_read_page", JSON.stringify({ doc: docId, page: 1 }));
   assert.match(page[0].text, /Intro to widgets/);
 
   assert.equal(await registry.ingest({ filename: "archive.zip", data: "AAAA" }), null, "unrecognised types fall through");
@@ -185,14 +185,14 @@ test("a chat file part is replaced by a descriptor before translation", async ()
 test("speaker notes are not part of the page text unless asked for", async () => {
   const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
   const file = await fixtureDeck();
-  const opened = await registry.call("docs__open", JSON.stringify({ path: file }));
+  const opened = await registry.call("proxy_docs_open", JSON.stringify({ path: file }));
   const docId = opened.split("\n")[0].split(" ")[1];
 
-  const plain = await registry.call("docs__read_page", JSON.stringify({ doc: docId, page: 1, images: false }));
+  const plain = await registry.call("proxy_docs_read_page", JSON.stringify({ doc: docId, page: 1, images: false }));
   assert.equal(plain[0].text.includes("speaker notes"), false);
 
   const withNotes = await registry.call(
-    "docs__read_page",
+    "proxy_docs_read_page",
     JSON.stringify({ doc: docId, page: 1, images: false, notes: true }),
   );
   assert.match(withNotes[0].text, /speaker notes \(not on the slide\)/);
@@ -223,11 +223,11 @@ test("a lost document id is recoverable in one call, and reopening is cached", a
   const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
   const file = await fixtureDeck();
 
-  const first = await registry.call("docs__open", JSON.stringify({ path: file }));
-  const second = await registry.call("docs__open", JSON.stringify({ path: file }));
+  const first = await registry.call("proxy_docs_open", JSON.stringify({ path: file }));
+  const second = await registry.call("proxy_docs_open", JSON.stringify({ path: file }));
   assert.equal(first, second, "the same file must produce the same descriptor");
 
   // What a client with a compacted history has left: the path, not the id.
-  const page = await registry.call("docs__read_page", JSON.stringify({ doc: file, page: 1, images: false }));
+  const page = await registry.call("proxy_docs_read_page", JSON.stringify({ doc: file, page: 1, images: false }));
   assert.match(page[0].text, /Intro to widgets/);
 });

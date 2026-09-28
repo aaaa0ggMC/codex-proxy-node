@@ -5,7 +5,7 @@ import { note, stripNotes, stripWrapper } from "../src/notes.js";
 
 test("stripWrapper leaves only the model's own thinking", () => {
   assert.equal(
-    stripWrapper("<th><mth>real thinking</mth><ignore>docs__open …</ignore></th>"),
+    stripWrapper("<th><mth>real thinking</mth><ignore>proxy_docs_open …</ignore></th>"),
     "real thinking",
   );
 });
@@ -18,7 +18,7 @@ test("replayed thinking goes back as a reasoning item", () => {
       {
         role: "assistant",
         content: "here is the answer",
-        reasoning_content: "<th><mth>weighing options</mth><ignore>docs__open …</ignore></th>",
+        reasoning_content: "<th><mth>weighing options</mth><ignore>proxy_docs_open …</ignore></th>",
       },
       { role: "user", content: "and page 2?" },
     ],
@@ -29,13 +29,13 @@ test("replayed thinking goes back as a reasoning item", () => {
 });
 
 test("stripNotes removes a note and leaves the surrounding answer alone", () => {
-  assert.equal(stripNotes(`answer\n<th>${note("docs__read_page …")}</th>`), "answer");
+  assert.equal(stripNotes(`answer\n<th>${note("proxy_docs_read_page …")}</th>`), "answer");
   assert.equal(stripNotes("nothing to do"), "nothing to do");
   assert.equal(stripNotes(note("only a note")), "");
 });
 
 test("stripNotes keeps real model reasoning", () => {
-  const history = `<th><mth>weighing options</mth>${note("docs__search …")}</th>`;
+  const history = `<th><mth>weighing options</mth>${note("proxy_docs_search …")}</th>`;
   assert.equal(stripNotes(history), "<th><mth>weighing options</mth></th>");
 });
 
@@ -59,7 +59,7 @@ test("a replayed thinking block never reaches the model", () => {
     model: "gpt-5.5",
     messages: [
       { role: "user", content: "read the deck" },
-      { role: "assistant", content: `the answer\n<th>${note("docs__read_page …")}</th>` },
+      { role: "assistant", content: `the answer\n<th>${note("proxy_docs_read_page …")}</th>` },
       { role: "user", content: "and page 2?" },
     ],
   });

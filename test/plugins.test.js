@@ -83,10 +83,10 @@ test("buildRegistry namespaces tools and skips a plugin that misbehaves", async 
   const { lines, log } = collector();
   const registry = buildRegistry(await loadPlugins(dir), { log });
 
-  assert.deepEqual([...registry.names()], ["docs__read"]);
-  assert.equal(registry.owns("docs__read"), true);
+  assert.deepEqual([...registry.names()], ["proxy_docs_read"]);
+  assert.equal(registry.owns("proxy_docs_read"), true);
   assert.equal(registry.owns("read"), false);
-  assert.equal(registry.definitions()[0].name, "docs__read");
+  assert.equal(registry.definitions()[0].name, "proxy_docs_read");
   assert.ok(lines.some((line) => /duplicate tool/.test(line.error)), "the clash should be reported");
 });
 

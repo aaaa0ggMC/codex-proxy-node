@@ -16,7 +16,7 @@ Folders are recognised by name, so nothing has to be moved around:
 ```js
 export default {
   name: "docs",            // required
-  namespace: true,         // optional: tool names become docs__<tool>
+  namespace: false,        // optional: opt out of the proxy_<plugin>_<tool> prefix
   instructions: "…",       // optional: a Skill's prompt fragment
   ingest: async (parts, ctx) => parts,   // optional: rewrite attachment content
   tools: [

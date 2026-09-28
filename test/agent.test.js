@@ -45,7 +45,7 @@ function docsPlugin(result) {
     name: "docs",
     tools: [
       {
-        name: "docs_read_page",
+        name: "read_page",
         description: "read a page",
         parameters: { type: "object", properties: { page: { type: "number" } } },
         run: async (args) => result(args),
@@ -55,11 +55,11 @@ function docsPlugin(result) {
 }
 
 test("mergeTools lets a client-owned tool win over a plugin tool", () => {
-  const merged = mergeTools([{ type: "function", name: "docs_read_page" }], [
-    { type: "function", name: "docs_read_page" },
+  const merged = mergeTools([{ type: "function", name: "proxy_docs_read_page" }], [
+    { type: "function", name: "proxy_docs_read_page" },
     { type: "function", name: "docs_search" },
   ]);
-  assert.deepEqual(merged.map((t) => t.name), ["docs_read_page", "docs_search"]);
+  assert.deepEqual(merged.map((t) => t.name), ["proxy_docs_read_page", "docs_search"]);
   assert.equal(merged.length, 2, "the client tool is not duplicated");
 });
 
@@ -73,7 +73,7 @@ test("runAgent passes events straight through when there are no local tools", as
 });
 
 test("runAgent runs a local tool, feeds the result back, and hides the call", async () => {
-  const fake = scripted([toolTurn("docs_read_page", { page: 2 }, "call_1"), textTurn("slide two is blue")]);
+  const fake = scripted([toolTurn("proxy_docs_read_page", { page: 2 }, "call_1"), textTurn("slide two is blue")]);
   const registry = new ToolRegistry().register(
     docsPlugin((args) => [
       { type: "input_text", text: `page ${args.page}` },
@@ -88,7 +88,7 @@ test("runAgent runs a local tool, feeds the result back, and hides the call", as
     "response.output_text.delta",
     "response.completed",
   ]);
-  assert.equal(events[0].data.name, "docs_read_page", "the caller is told a local tool is running");
+  assert.equal(events[0].data.name, "proxy_docs_read_page", "the caller is told a local tool is running");
   assert.ok(
     !events.some((e) => e.data?.item?.type === "function_call"),
     "a local tool call must never reach the client",
@@ -96,14 +96,14 @@ test("runAgent runs a local tool, feeds the result back, and hides the call", as
 
   assert.equal(fake.payloads.length, 2, "the loop must make a second turn");
   const replay = fake.payloads[1].input;
-  assert.deepEqual(replay[0], { type: "function_call", call_id: "call_1", name: "docs_read_page", arguments: '{"page":2}' });
+  assert.deepEqual(replay[0], { type: "function_call", call_id: "call_1", name: "proxy_docs_read_page", arguments: '{"page":2}' });
   assert.deepEqual(replay[1].output, [
     { type: "input_text", text: "page 2" },
     { type: "input_image", image_url: "data:image/png;base64,AAAA" },
   ]);
 
   const declarations = fake.payloads[0].tools.map((t) => t.name);
-  assert.deepEqual(declarations, ["docs_read_page"]);
+  assert.deepEqual(declarations, ["proxy_docs_read_page"]);
 });
 
 test("runAgent hands a client-owned tool call back instead of running it", async () => {
@@ -120,7 +120,7 @@ test("runAgent hands a client-owned tool call back instead of running it", async
 
 test("runAgent tells the model when a local tool fails", async () => {
   const fake = scripted([
-    toolTurn("docs_read_page", { page: 99 }, "call_2"),
+    toolTurn("proxy_docs_read_page", { page: 99 }, "call_2"),
     textTurn("that page does not exist"),
   ]);
   const registry = new ToolRegistry().register(
@@ -131,11 +131,11 @@ test("runAgent tells the model when a local tool fails", async () => {
 
   await collect(runAgent({ stream: fake.stream, request: { input: [] }, registry }));
 
-  assert.deepEqual(fake.payloads[1].input[1].output, "Tool docs_read_page failed: no such page");
+  assert.deepEqual(fake.payloads[1].input[1].output, "Tool proxy_docs_read_page failed: no such page");
 });
 
 test("runAgent stops at maxTurns", async () => {
-  const fake = scripted([toolTurn("docs_read_page", { page: 1 }, "call_x")]);
+  const fake = scripted([toolTurn("proxy_docs_read_page", { page: 1 }, "call_x")]);
   const registry = new ToolRegistry().register(docsPlugin(() => "ok"));
   await collect(runAgent({ stream: fake.stream, request: { input: [] }, registry, maxTurns: 3 }));
   assert.equal(fake.payloads.length, 3);
@@ -154,9 +154,9 @@ test("ToolRegistry parses JSON arguments and normalises results", async () => {
     tools: [{ name: "echo", run: async (args) => (seen.push(args), { got: args.n }) }],
   });
 
-  assert.equal(await registry.call("echo", '{"n":3}'), '{"got":3}');
+  assert.equal(await registry.call("proxy_t_echo", '{"n":3}'), '{"got":3}');
   assert.deepEqual(seen, [{ n: 3 }]);
-  await assert.rejects(registry.call("echo", "{oops"), /not JSON/);
+  await assert.rejects(registry.call("proxy_t_echo", "{oops"), /not JSON/);
   await assert.rejects(registry.call("missing", "{}"), /unknown tool/);
 });
 
