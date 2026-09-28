@@ -568,6 +568,11 @@ export class Server {
 
     sendChunk([openAIChatDeltaChoice({ role: "assistant", content: "" }, null)], null);
 
+    // Whether a citation ever reached us is otherwise invisible: a missing annotation in the client
+    // could equally be the provider never sending one or us dropping it.
+    const eventTypes = new Map();
+    const tally = (type) => eventTypes.set(type, (eventTypes.get(type) ?? 0) + 1);
+
     // Everything the client should fold away goes inside one <th>: the model's own thinking as
     // <mth>, our progress notes as <ignore>. The block is opened lazily and closed as soon as
     // real answer text starts, so the answer never ends up inside a thinking block.
@@ -590,6 +595,7 @@ export class Server {
         // A hosted search is otherwise invisible downstream: the client sees a pause and nothing
         // else. The phases go out on the reasoning channel, inside <ignore>, because they are
         // moment-to-moment progress rather than something worth replaying.
+        if (typeof event.type === "string") tally(event.type);
         if (typeof event.type === "string" && event.type.startsWith("response.web_search_call.")) {
           openReasoning();
           const phase = event.type.slice("response.web_search_call.".length);
@@ -696,6 +702,10 @@ export class Server {
     } finally {
       stopKeepalive();
     }
+
+    this.log.info("upstream event types", {
+      events: [...eventTypes.entries()].map(([type, count]) => `${type}=${count}`).join(" "),
+    });
 
     closeReasoning();
     sendChunk([openAIChatDeltaChoice({}, finishReason)], null);
