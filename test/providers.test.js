@@ -171,3 +171,24 @@ test("the openai provider maps /models and reports upstream errors with a status
     await upstream.close();
   }
 });
+
+test("the bridge carries thinking under either field name", async () => {
+  const upstream = await fakeOpenAI({
+    chunks: [
+      { choices: [{ index: 0, delta: { reasoning: "stepfun spells it reasoning. " } }] },
+      { choices: [{ index: 0, delta: { reasoning_content: "deepseek spells it reasoning_content. " } }] },
+      { choices: [{ index: 0, delta: { content: "answer" } }] },
+    ],
+  });
+  try {
+    const provider = new OpenAICompatProvider({ baseURL: upstream.base });
+    const events = await collect(provider.events({ model: "m", input: [{ role: "user", content: "hi" }] }));
+    const thinking = events
+      .filter((event) => event.type === "response.reasoning_summary_text.delta")
+      .map((event) => event.data.delta)
+      .join("");
+    assert.equal(thinking, "stepfun spells it reasoning. deepseek spells it reasoning_content. ");
+  } finally {
+    await upstream.close();
+  }
+});
