@@ -587,6 +587,19 @@ export class Server {
       while (!step.done) {
         const event = step.value;
         if (res.writableEnded || res.destroyed) return;
+        // A hosted search is otherwise invisible downstream: the client sees a pause and nothing
+        // else. The phases go out on the reasoning channel, inside <ignore>, because they are
+        // moment-to-moment progress rather than something worth replaying.
+        if (typeof event.type === "string" && event.type.startsWith("response.web_search_call.")) {
+          openReasoning();
+          const phase = event.type.slice("response.web_search_call.".length);
+          sendChunk(
+            [openAIChatDeltaChoice({ reasoning_content: note(`web search: ${phase}`) }, null)],
+            null,
+          );
+          step = await agent.next();
+          continue;
+        }
         switch (event.type) {
           case "response.output_text.delta":
             closeReasoning();

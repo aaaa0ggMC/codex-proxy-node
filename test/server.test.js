@@ -512,3 +512,41 @@ test("model reasoning and progress share one folded <th> block", async () => {
     await proxy.close();
   }
 });
+
+test("a hosted web search is visible on the reasoning channel", async () => {
+  const provider = {
+    async *events() {
+      yield { type: "response.web_search_call.searching", data: {} };
+      yield { type: "response.web_search_call.completed", data: {} };
+      yield { type: "response.output_text.delta", data: { delta: "the answer" } };
+      yield { type: "response.completed", data: { response: { id: "r", status: "completed" } } };
+    },
+    async models() {
+      return [];
+    },
+    async usage() {
+      return null;
+    },
+  };
+  const proxy = await startHttpServer(new Server({ provider, log: silentLog, usageTTL: 60 }).handler());
+  try {
+    const text = await (await chat(proxy.base, {
+      model: "m",
+      stream: true,
+      messages: [{ role: "user", content: "what is new?" }],
+    })).text();
+
+    const deltas = text
+      .split("\n")
+      .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+      .map((line) => JSON.parse(line.slice(6)).choices?.[0]?.delta ?? {});
+
+    const reasoning = deltas.map((d) => d.reasoning_content ?? "").join("");
+    assert.match(reasoning, /web search: searching/, `expected a search note in ${reasoning}`);
+    assert.match(reasoning, /web search: completed/);
+    assert.ok(reasoning.includes("<ignore>"), "progress is bookkeeping, not content");
+    assert.equal(deltas.map((d) => d.content ?? "").join(""), "the answer");
+  } finally {
+    await proxy.close();
+  }
+});
