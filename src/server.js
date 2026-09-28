@@ -15,6 +15,7 @@ import {
   openAIChatToolCallDelta,
   openAIErrorResponse,
   openAIModelsResponse,
+  chatAnnotationFromResponses,
 } from "./schema.js";
 import { setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
 import { usageReport, usageText, usageValue } from "./usage.js";
@@ -648,7 +649,10 @@ export class Server {
           case "response.output_text.annotation.added": {
             const annotation = event.data.annotation;
             if (annotation != null) {
-              sendChunk([openAIChatDeltaChoice({ annotations: [annotation] }, null)], null);
+              sendChunk(
+                [openAIChatDeltaChoice({ annotations: [chatAnnotationFromResponses(annotation)] }, null)],
+                null,
+              );
             }
             break;
           }

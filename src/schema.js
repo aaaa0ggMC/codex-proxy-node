@@ -209,6 +209,17 @@ export function chatToolCallsFromOutput(output) {
   return toolCalls;
 }
 
+// The two APIs disagree on the shape of a citation: Responses puts the fields on the annotation,
+// Chat Completions nests them under url_citation. Sending the Responses shape to a chat client
+// renders as an empty reference, which is exactly what a blank "[1]" is.
+export function chatAnnotationFromResponses(annotation) {
+  if (annotation == null || typeof annotation !== "object") return annotation;
+  if (stringValue(annotation, "type") !== "url_citation") return annotation;
+  const { type, ...rest } = annotation;
+  void type;
+  return { type: "url_citation", url_citation: rest };
+}
+
 export function chatAnnotationsFromOutput(output) {
   const annotations = [];
   for (const item of output) {
@@ -217,7 +228,9 @@ export function chatAnnotationsFromOutput(output) {
     }
     if (!Array.isArray(item.content)) continue;
     for (const part of item.content) {
-      if (part != null && Array.isArray(part.annotations)) annotations.push(...part.annotations);
+      if (part != null && Array.isArray(part.annotations)) {
+        annotations.push(...part.annotations.map(chatAnnotationFromResponses));
+      }
     }
   }
   return annotations;

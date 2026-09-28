@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chatCompletionFromAggregate, openAIModelsResponse } from "../src/schema.js";
+import { chatAnnotationFromResponses, chatCompletionFromAggregate, openAIModelsResponse } from "../src/schema.js";
 
 const models = [
   { slug: "gpt-5.5", supported_in_api: true, visibility: "list", search_aliases: true },
@@ -60,5 +60,23 @@ test("chatCompletionFromAggregate carries annotations through", () => {
   assert.equal(chat.id, "chatcmpl-123456");
   const annotations = chat.choices[0].message.annotations;
   assert.equal(annotations.length, 1);
-  assert.equal(annotations[0].url, "https://example.com");
+  assert.equal(annotations[0].url_citation.url, "https://example.com", "reshaped for the chat API");
+});
+
+test("a citation is reshaped for the chat API", () => {
+  const responses = { type: "url_citation", url: "https://example.com", title: "Example", start_index: 1, end_index: 9 };
+  assert.deepEqual(chatAnnotationFromResponses(responses), {
+    type: "url_citation",
+    url_citation: { url: "https://example.com", title: "Example", start_index: 1, end_index: 9 },
+  });
+  assert.equal(chatAnnotationFromResponses(null), null);
+
+  const agg = {
+    id: "resp_1",
+    created_at: 0,
+    outputText: "answer",
+    output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "answer", annotations: [responses] }] }],
+  };
+  const annotations = chatCompletionFromAggregate(agg, "m").choices[0].message.annotations;
+  assert.equal(annotations[0].url_citation.url, "https://example.com");
 });
