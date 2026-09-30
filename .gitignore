@@ -6,3 +6,5 @@ node_modules/
 config.json
 # Local plugin on/off state, written by the admin page.
 plugins-state.json
+# Retained tool evidence and conversation references (local data).
+.proxy-context/

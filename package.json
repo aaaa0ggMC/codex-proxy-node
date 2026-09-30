@@ -15,5 +15,9 @@
     "test": "node --test"
   },
   "license": "MIT",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@matbee/libreoffice-converter": "^2.7.2",
+    "pptx-glimpse": "^5.3.1"
+  }
 }

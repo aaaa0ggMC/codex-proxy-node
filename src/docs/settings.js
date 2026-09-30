@@ -21,3 +21,16 @@ export function imageMaxEdge() {
 }
 
 export { DEFAULT_MAX_EDGE, MIN_EDGE, MAX_EDGE };
+
+// Office rendering (LibreOffice WASM) is slow enough that it is behind a switch: production leaves
+// it on, tests turn it off so a fixture never pays a minute of conversion.
+let officeConverter = true;
+
+export function setOfficeConverter(enabled) {
+  officeConverter = enabled === true;
+  return officeConverter;
+}
+
+export function officeConverterEnabled() {
+  return officeConverter;
+}

@@ -13,6 +13,7 @@ import { createLoggerTo } from "./log.js";
 import { buildRegistry, loadPlugins } from "./plugins/loader.js";
 import { loadDisabledPlugins } from "./admin.js";
 import { setImageMaxEdge } from "./docs/settings.js";
+import { ContextStore } from "./context-store.js";
 
 // Prefer IPv4 when resolving the upstream. Go's dialer does happy-eyeballs and falls back on its
 // own, but Node connects to the first address DNS hands back; on dual-stack and fake-IP (TUN)
@@ -76,6 +77,7 @@ async function main(argv) {
     pluginStateFile,
     maxTurns: cfg.maxTurns,
     discardImages: cfg.discardImages,
+    contextStore: new ContextStore({ directory: cfg.contextDir }),
   });
 
   const httpServer = http.createServer(server.handler());

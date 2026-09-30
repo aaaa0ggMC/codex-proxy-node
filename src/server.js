@@ -20,10 +20,20 @@ import {
 import { setSSEHeaders, writeSSEData, writeSSEDone } from "./sse.js";
 import { usageReport, usageText, usageValue } from "./usage.js";
 import { runAgent } from "./agent/loop.js";
+import { restoreResponseInput, transformEvents, withLeadingInjection } from "./transforms.js";
 import { note } from "./notes.js";
 import { checkpoint } from "./checkpoints.js";
 import { handleAdmin } from "./admin.js";
-import { applyInputSwitches, applyModuleSwitches } from "./modules.js";
+import { applyInputSwitches, applyModuleSwitches, enabledModules } from "./modules.js";
+import { ContextStore } from "./context-store.js";
+import { ConversationContext, carryContext, CONTEXT_TOOL } from "./context.js";
+import { TOOL_PREFIX } from "./agent/names.js";
+import { attachOnce } from "./sdk.js";
+import { getImage } from "./media.js";
+
+// The per-request plugin gate: what the conversation switched off, what it switched back on, and the
+// raw switches (a plugin may want to see them).
+const NO_MODULES = { disabled: new Set(), include: new Set(), switches: [], origin: "" };
 
 export class Server {
   #usageLock = Promise.resolve();
@@ -40,6 +50,7 @@ export class Server {
     progress = false,
     keepaliveMs = 15_000,
     pluginStateFile = "",
+    contextStore = new ContextStore(),
   }) {
     this.provider = provider;
     this.log = log;
@@ -52,6 +63,7 @@ export class Server {
     this.progress = progress;
     this.keepaliveMs = keepaliveMs;
     this.pluginStateFile = pluginStateFile;
+    this.contextStore = contextStore;
     this.usageCache = null;
     this.usageCacheAt = 0;
   }
@@ -121,6 +133,12 @@ export class Server {
           return;
         }
       }
+      // A rendered image is fetched by the client's markdown renderer, which sends no bearer
+      // token; it is content the user was already shown, so it is served without the key.
+      if (req.method === "GET" && url.pathname.startsWith("/media/")) {
+        this.#handleMedia(res, url.pathname.slice("/media/".length));
+        return;
+      }
       if (!this.#authorized(req)) {
         res.setHeader("WWW-Authenticate", 'Bearer realm="codex-proxy"');
         writeOpenAIError(res, 401, "missing or invalid API key");
@@ -142,7 +160,7 @@ export class Server {
   async #route(req, res, url) {
     const { method } = req;
     const path = url.pathname;
-    if (method === "GET" && path === "/healthz") return writeJSON(res, 200, { ok: true });
+    if (method === "GET" && path === "/healthz") return this.#handleHealth(res);
     if (method === "GET" && path === "/v1/models") return this.#handleModels(req, res);
     if (method === "GET" && path === "/v1/usage") return this.#handleUsage(req, res, url);
     if (method === "POST" && path === "/v1/responses") return this.#handleResponses(req, res);
@@ -150,6 +168,29 @@ export class Server {
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("404 page not found\n");
+  }
+
+  // Health is also the discovery hook: a supervisor (MCPHub) reads this payload to find the plugin
+  // console and link to it. The console is served without a key, so a key-protected proxy does not
+  // advertise one; anything else keeps the plain liveness answer.
+  #handleHealth(res) {
+    const body = { ok: true };
+    if (this.registry != null && this.apiKey === "" && this.pluginStateFile !== "") {
+      body.ui = "/admin/plugins";
+      body.uiLabel = "Plugins";
+    }
+    writeJSON(res, 200, body);
+  }
+
+  #handleMedia(res, id) {
+    const image = getImage(decodeURIComponent(String(id ?? "")));
+    if (image == null) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("404 image not found\n");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": image.mime, "Cache-Control": "private, max-age=300" });
+    res.end(image.bytes);
   }
 
   #authorized(req) {
@@ -261,17 +302,32 @@ export class Server {
     }
 
     // Same switch, expressed against the Responses input shape.
-    const disabledPlugins = applyInputSwitches(request.input, this.registry?.pluginNames() ?? []);
-    if (disabledPlugins.size > 0) {
-      this.log.info("modules disabled by switch", { modules: [...disabledPlugins] });
+    const parsed = applyInputSwitches(request.input, this.registry?.pluginNames() ?? []);
+    const modules = {
+      disabled: parsed.disabled,
+      switches: parsed.switches,
+      include: enabledModules(parsed.switches, this.registry?.pluginNames() ?? []),
+      origin: originOf(req),
+    };
+    if (modules.disabled.size > 0) {
+      this.log.info("modules disabled by switch", { modules: [...modules.disabled] });
     }
+    if (modules.include.size > 0) {
+      this.log.info("modules switched on by tag", { modules: [...modules.include] });
+    }
+    // A rendered answer is replayed as an image; put the source back before the provider sees it.
+    restoreResponseInput(request.input, {
+      registry: this.registry,
+      disabledPlugins: modules.disabled,
+      include: modules.include,
+    });
 
     if (stream) {
-      await this.#streamResponses(req, res, request, disabledPlugins);
+      await this.#streamResponses(req, res, request, modules);
       return;
     }
     try {
-      const agg = await this.#aggregate(req, res, request, disabledPlugins);
+      const agg = await this.#aggregate(req, res, request, modules);
       writeJSON(res, 200, serializeAggregate(agg));
     } catch (err) {
       writeOpenAIError(res, 502, err.message);
@@ -289,8 +345,9 @@ export class Server {
 
     // Chat attachments arrive inline, so turn them into open documents before translation. This
     // has to happen per request because the client re-sends the file with every turn.
+    const ingested = [];
     try {
-      await this.#ingestAttachments(raw);
+      await this.#ingestAttachments(raw, ingested);
     } catch (err) {
       writeOpenAIError(res, 400, err.message);
       return;
@@ -298,9 +355,19 @@ export class Server {
 
     // <disable_module> in the first user message turns a module off for this conversation. The tag
     // is stripped either way, so the upstream model never sees the control syntax.
-    const disabledPlugins = applyModuleSwitches(raw.messages, this.registry?.pluginNames() ?? []);
-    if (disabledPlugins.size > 0) {
-      this.log.info("modules disabled by switch", { modules: [...disabledPlugins] });
+    const parsed = applyModuleSwitches(raw.messages, this.registry?.pluginNames() ?? []);
+    const modules = {
+      disabled: parsed.disabled,
+      switches: parsed.switches,
+      include: enabledModules(parsed.switches, this.registry?.pluginNames() ?? []),
+      ingested,
+      origin: originOf(req),
+    };
+    if (modules.disabled.size > 0) {
+      this.log.info("modules disabled by switch", { modules: [...modules.disabled] });
+    }
+    if (modules.include.size > 0) {
+      this.log.info("modules switched on by tag", { modules: [...modules.include] });
     }
 
     let request;
@@ -309,6 +376,8 @@ export class Server {
       ({ request, stream } = buildResponsesRequestFromChat(raw, {
         webSearch: this.webSearch,
         searchAliases: await this.#searchAliases(raw.model, res),
+        restoreText: (text, extra) =>
+          this.registry?.restore(text, { exclude: modules.disabled, include: modules.include, ...extra }) ?? text,
       }));
     } catch (err) {
       writeOpenAIError(res, 400, err.message);
@@ -317,11 +386,11 @@ export class Server {
 
     const model = stringValue(raw, "model");
     if (stream) {
-      await this.#streamChatCompletions(req, res, request, model, includeUsage(raw), disabledPlugins);
+      await this.#streamChatCompletions(req, res, request, model, includeUsage(raw), modules);
       return;
     }
     try {
-      const agg = await this.#aggregate(req, res, request, disabledPlugins);
+      const agg = await this.#aggregate(req, res, request, modules);
       writeJSON(res, 200, chatCompletionFromAggregate(agg, model));
     } catch (err) {
       writeOpenAIError(res, 502, err.message);
@@ -330,7 +399,7 @@ export class Server {
 
   // Attachments are inline base64 in a "file" part. Each one is handed to the plugin registry and
   // replaced by a text descriptor, so the translator never sees a shape the provider cannot take.
-  async #ingestAttachments(raw) {
+  async #ingestAttachments(raw, ingested) {
     if (this.registry == null || !Array.isArray(raw.messages)) return;
     // The shape of what arrived, sizes only: enough to see where a prompt's tokens come from
     // without putting message content in the log.
@@ -386,6 +455,7 @@ export class Server {
         const comma = inline.indexOf(",");
         const data = inline.startsWith("data:") && comma !== -1 ? inline.slice(comma + 1) : "";
         const descriptor = await this.registry.ingest({ filename, data });
+        if (descriptor != null) ingested.push({ filename, output: descriptor });
         message.content[index] = {
           type: "text",
           text:
@@ -395,11 +465,11 @@ export class Server {
       }
       // Some clients do not attach the bytes at all: they mention the file as a URL or a path
       // inside the text. Fetching that reference is what makes "look at this deck" work for them.
-      await this.#ingestReferences(message);
+      await this.#ingestReferences(message, ingested);
     }
   }
 
-  async #ingestReferences(message) {
+  async #ingestReferences(message, ingested) {
     const additions = [];
     for (const part of message.content) {
       if (part?.type !== "text" || typeof part.text !== "string") continue;
@@ -412,7 +482,10 @@ export class Server {
             filename: path.basename(reference),
             data: bytes.toString("base64"),
           });
-          if (descriptor != null) additions.push({ type: "text", text: descriptor });
+          if (descriptor != null) {
+            additions.push({ type: "text", text: descriptor });
+            ingested.push({ filename: reference, output: descriptor });
+          }
         } catch (err) {
           this.log.warn("attachment reference could not be read", { reference, error: err.message });
         }
@@ -439,9 +512,9 @@ export class Server {
     }
   }
 
-  async #aggregate(req, res, request, disabledPlugins = []) {
+  async #aggregate(req, res, request, modules = NO_MODULES) {
     // Go through #agent so the non-streaming path gets the same loop settings as the streaming one.
-    const { agent, stopKeepalive } = this.#agent(req, res, request, disabledPlugins);
+    const { agent, stopKeepalive } = await this.#agent(req, res, request, modules);
     try {
       return await aggregateResponsesStream(agent, request);
     } finally {
@@ -462,12 +535,43 @@ export class Server {
     return this.provider.supportsSearchAliases(model, this.#signal(res));
   }
 
-  #agent(req, res, request, disabledPlugins = []) {
+  async #agent(req, res, request, modules = NO_MODULES) {
     const signal = this.#signal(res);
-    return {
-      signal,
-      ...this.#keepalive(res),
-      agent: runAgent({
+    const context = this.contextStore == null ? null : new ConversationContext(this.contextStore);
+    if (context != null) request.input = await context.restore(request.input ?? []);
+    if (context != null) {
+      for (const attachment of modules.ingested ?? []) {
+        await context.record(`${TOOL_PREFIX}_attachment_ingest`, JSON.stringify({ filename: attachment.filename }), attachment.output);
+      }
+    }
+    // Explicit activation belongs to the core, not to a helper plugin or a special lore field.
+    // Definitions, instructions and transforms use the same gate below.
+    const activated = attachOnce(request.input, [...modules.include]
+      .filter((name) => !modules.disabled.has(name))
+      .map((name) => ({ tag: "plugin-inject", name, body: this.registry?.reference(name) ?? "" })))
+      ?? { append: [], carried: [] };
+    if (activated.append.length > 0) request.input = [...request.input, ...activated.append];
+    // A plugin may contribute tail context (a mention activating a lorebook entry, say). It is a
+    // pure function of the input, so appending it at the tail keeps the cached prefix intact, and
+    // the notes ride the thinking channel so the client's history records what the model was given.
+    const { append, notes, carried } = this.registry?.contribute?.(request, {
+      exclude: modules.disabled,
+      include: modules.include,
+      switches: modules.switches,
+    }) ?? { append: [], notes: [], carried: [] };
+    if (append.length > 0) request.input = [...(request.input ?? []), ...append];
+    if (context != null) {
+      for (const message of append) {
+        const content = message.content ?? message.output ?? "";
+        const output = Array.isArray(content)
+          ? content.map((part) => ["text", "output_text"].includes(part?.type) ? { ...part, type: "input_text" } : part)
+          : typeof content === "string" ? content : JSON.stringify(content);
+        await context.record(CONTEXT_TOOL, '{"note":"plugin contribution"}', output);
+      }
+    }
+
+    const streamed = transformEvents(
+      runAgent({
         stream: (payload, sig) => this.#upstreamEvents(payload, sig),
         request,
         registry: this.registry,
@@ -475,9 +579,16 @@ export class Server {
         log: this.log,
         maxTurns: this.maxTurns,
         discardImages: this.discardImages,
-        disabledPlugins,
+        disabledPlugins: [...modules.disabled],
+        includedPlugins: [...modules.include],
+        context,
       }),
-    };
+      { registry: this.registry, disabledPlugins: modules.disabled, include: modules.include, origin: modules.origin ?? "" },
+    );
+    const allCarried = [...activated.carried, ...carried];
+    const injected = notes.length > 0 || allCarried.length > 0 ? withLeadingInjection({ notes, carried: allCarried }, streamed) : streamed;
+    const agent = context == null ? injected : carryContext(injected, context);
+    return { signal, ...this.#keepalive(res), agent };
   }
 
   // A local tool can take seconds (rendering a PDF page, re-encoding a slide). Chat Completions has
@@ -493,8 +604,8 @@ export class Server {
     return { stopKeepalive: () => clearInterval(timer) };
   }
 
-  async #streamResponses(req, res, request, disabledPlugins = []) {
-    const { agent, stopKeepalive } = this.#agent(req, res, request, disabledPlugins);
+  async #streamResponses(req, res, request, modules = NO_MODULES) {
+    const { agent, stopKeepalive } = await this.#agent(req, res, request, modules);
 
     // Same eager first pull as the chat path, so an upstream refusal stays an HTTP status.
     let step;
@@ -513,6 +624,15 @@ export class Server {
         if (res.writableEnded || res.destroyed) return;
         const event = step.value;
         if (event.type === "codex_proxy.tool_start") {
+          step = await agent.next();
+          continue;
+        }
+        if (event.type === "codex_proxy.progress") {
+          // A running tool's own progress, shown in thinking and stripped on replay (<ignore>).
+          const text = stringValue(event.data, "text");
+          if (text !== "") {
+            res.write(`event: response.reasoning_text.delta\ndata: ${JSON.stringify({ type: "response.reasoning_text.delta", delta: note(text) })}\n\n`);
+          }
           step = await agent.next();
           continue;
         }
@@ -539,8 +659,8 @@ export class Server {
     res.end();
   }
 
-  async #streamChatCompletions(req, res, request, model, sendUsage, disabledPlugins = []) {
-    const { agent, stopKeepalive } = this.#agent(req, res, request, disabledPlugins);
+  async #streamChatCompletions(req, res, request, model, sendUsage, modules = NO_MODULES) {
+    const { agent, stopKeepalive } = await this.#agent(req, res, request, modules);
 
     // Pull the first event before writing anything, so an upstream refusal is still a plain HTTP
     // error instead of a half-written SSE stream.
@@ -561,6 +681,10 @@ export class Server {
     let finishReason = "stop";
     let usage = null;
     let toolIndex = 0;
+    const streamedReasoning = new Map();
+    let unkeyedReasoning = "";
+    const reasoningKey = (data) => data?.item_id ?? data?.item?.id
+      ?? (Number.isInteger(data?.output_index) ? `index:${data.output_index}` : null);
 
     const sendChunk = (choices, chunkUsage) => {
       if (res.writableEnded || res.destroyed) return;
@@ -628,20 +752,33 @@ export class Server {
             sendChunk([openAIChatDeltaChoice({ content: stringValue(event.data, "delta") }, null)], null);
             break;
           case "response.reasoning_summary_text.delta":
-          case "response.reasoning_text.delta":
+          case "response.reasoning_text.delta": {
+            const delta = stringValue(event.data, "delta");
+            const key = reasoningKey(event.data);
+            if (key == null) unkeyedReasoning += delta;
+            else streamedReasoning.set(key, (streamedReasoning.get(key) ?? "") + delta);
             openReasoning();
             sendChunk(
-              [openAIChatDeltaChoice({ reasoning_content: stringValue(event.data, "delta") }, null)],
+              [openAIChatDeltaChoice({ reasoning_content: delta }, null)],
               null,
             );
             break;
+          }
           case "codex_proxy.checkpoint":
             // Content, not bookkeeping: inside the folded block but outside <ignore>, so it is not
             // stripped and the client keeps it for us.
             openReasoning();
             for (const block of event.data.blocks ?? []) {
-              sendChunk([openAIChatDeltaChoice({ reasoning_content: checkpoint(block) }, null)], null);
+              sendChunk([openAIChatDeltaChoice({ reasoning_content: `\n${checkpoint(block)}\n` }, null)], null);
             }
+            break;
+          case "codex_proxy.progress":
+            // A slow tool (LibreOffice, a PDF page) reports progress as it runs.
+            openReasoning();
+            sendChunk(
+              [openAIChatDeltaChoice({ reasoning_content: note(stringValue(event.data, "text")) }, null)],
+              null,
+            );
             break;
           case "codex_proxy.tool_start":
             // Reported as thinking rather than as answer text: a client renders it, and the marker
@@ -675,7 +812,16 @@ export class Server {
             const item = event.data.item;
             if (item != null && typeof item === "object" && stringValue(item, "type") === "reasoning") {
               // Hand the provider's own thinking to the client in the shape it replays back.
-              const thinking = reasoningTextOf(item);
+              let thinking = reasoningTextOf(item);
+              const key = reasoningKey(event.data);
+              const streamed = streamedReasoning.get(key) ?? unkeyedReasoning;
+              // A done item usually repeats text already sent as deltas. Forward only a missing
+              // tail, while still supporting providers that send reasoning only in the done item.
+              if (streamed !== "" && thinking.startsWith(streamed)) {
+                thinking = thinking.slice(streamed.length);
+                if (!streamedReasoning.has(key)) unkeyedReasoning = "";
+              }
+              streamedReasoning.delete(key);
               if (thinking !== "") {
                 openReasoning();
                 sendChunk([openAIChatDeltaChoice({ reasoning_content: thinking }, null)], null);
@@ -829,4 +975,12 @@ export function writeOpenAIError(res, status, message) {
     return;
   }
   writeJSON(res, status, openAIErrorResponse(message));
+}
+
+
+// The markdown image a plugin writes for the user must be fetchable by the client, so its URL is
+// absolute and built from the Host the request arrived on.
+function originOf(req) {
+  const host = stringValue(req?.headers, "host");
+  return host === "" ? "" : `http://${host}`;
 }

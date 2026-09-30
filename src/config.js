@@ -28,6 +28,7 @@ const flagSpec = {
   "reasoning-effort": { type: "string", fallback: "", help: "reasoning effort sent to the openai provider (low, medium, high)" },
   "max-turns": { type: "int", fallback: 256, help: "maximum agent loop turns per request; a runaway guard, not a working limit" },
   "discard-images": { type: "int", fallback: 0, help: "keep images from only the last N tool results (0 keeps all)" },
+  "context-dir": { type: "string", fallback: ".proxy-context", help: "directory for retained plugin results; empty string uses memory only" },
   config: { type: "string", fallback: "", help: "config.json describing several providers; defaults to CODEX_PROXY_CONFIG" },
   "image-max-edge": { type: "int", fallback: 1100, help: "longest edge, in pixels, of an image handed to the model (256-4096)" },
 };
@@ -148,6 +149,7 @@ export function parseFlags(args, env = process.env) {
     reasoningEffort: cfg["reasoning-effort"],
     maxTurns: cfg["max-turns"],
     discardImages: cfg["discard-images"],
+    contextDir: cfg["context-dir"],
     config: cfg.config,
     imageMaxEdge: cfg["image-max-edge"],
   };

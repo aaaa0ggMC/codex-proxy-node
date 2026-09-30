@@ -115,6 +115,55 @@ test("healthz answers without touching the upstream", async () => {
   }
 });
 
+test("healthz advertises the plugin console only when it is actually served", async () => {
+  const provider = new CodexProvider({
+    tokens: { token: async () => ({ accessToken: "tok", accountId: "acct-1" }) },
+  });
+
+  const plain = await startHttpServer(new Server({ provider, log: silentLog, usageTTL: 60 }).handler());
+  try {
+    assert.deepEqual(await (await fetch(`${plain.base}/healthz`)).json(), { ok: true });
+  } finally {
+    await plain.close();
+  }
+
+  const advertised = await startHttpServer(
+    new Server({
+      provider,
+      log: silentLog,
+      usageTTL: 60,
+      registry: new ToolRegistry(),
+      pluginStateFile: "/tmp/plugins-state.json",
+    }).handler(),
+  );
+  try {
+    const body = await (await fetch(`${advertised.base}/healthz`)).json();
+    assert.equal(body.ok, true);
+    assert.equal(body.ui, "/admin/plugins");
+    assert.equal(body.uiLabel, "Plugins");
+  } finally {
+    await advertised.close();
+  }
+
+  // With a key set the console is not served, so it must not be advertised either.
+  const guarded = await startHttpServer(
+    new Server({
+      provider,
+      log: silentLog,
+      usageTTL: 60,
+      apiKey: "secret",
+      registry: new ToolRegistry(),
+      pluginStateFile: "/tmp/plugins-state.json",
+    }).handler(),
+  );
+  try {
+    const resp = await fetch(`${guarded.base}/healthz`, { headers: { Authorization: "Bearer secret" } });
+    assert.deepEqual(await resp.json(), { ok: true });
+  } finally {
+    await guarded.close();
+  }
+});
+
 test("models lists the -search aliases so saved histories keep resolving", async () => {
   const upstream = await fakeUpstream();
   const proxy = await startProxy();
@@ -504,12 +553,36 @@ test("model reasoning and progress share one folded <th> block", async () => {
     const reasoning = deltas.map((d) => d.reasoning_content ?? "").join("");
     assert.equal(
       reasoning,
-      '<th><mth>weighing options. <ignore>proxy_docs_open(path=/tmp/a.pptx)</ignore>now reading.</mth></th>',
+      '<th><mth>weighing options. \n<ignore>proxy_docs_open(path=/tmp/a.pptx)</ignore>\nnow reading.</mth></th>',
     );
     assert.equal(deltas.map((d) => d.content ?? "").join(""), "the answer");
     assert.ok(!/answer/.test(reasoning), "the answer must not leak into the thinking block");
   } finally {
     await proxy.close();
+  }
+});
+
+test("reasoning done items do not repeat streamed text and still deliver missing tails", async () => {
+  for (const keyed of [true, false]) {
+    const provider = {
+      async *events() {
+        yield { type: "response.reasoning_summary_text.delta", data: { ...(keyed ? { item_id: "r1", output_index: 0 } : {}), delta: "searching the file. " } };
+        yield { type: "response.output_item.done", data: { item: { type: "reasoning", id: "r1", summary: [{ type: "summary_text", text: "searching the file. found it." }] } } };
+        // A distinct done-only item with identical words is genuine new output, not a duplicate.
+        yield { type: "response.output_item.done", data: { item: { type: "reasoning", id: "r2", summary: [{ type: "summary_text", text: "searching the file. " }] } } };
+        yield { type: "response.output_text.delta", data: { delta: "answer" } };
+        yield { type: "response.completed", data: { response: { status: "completed" } } };
+      },
+    };
+    const proxy = await startHttpServer(new Server({ provider, log: silentLog, keepaliveMs: 0 }).handler());
+    try {
+      const response = await chat(proxy.base, { model: "m", stream: true, messages: [{ role: "user", content: "read" }] });
+      const chunks = (await response.text()).split("\n").filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
+      const thinking = chunks.map((chunk) => chunk.choices?.[0]?.delta?.reasoning_content ?? "").join("");
+      assert.equal(thinking, "<th><mth>searching the file. found it.searching the file. </mth></th>");
+    } finally {
+      await proxy.close();
+    }
   }
 });
 

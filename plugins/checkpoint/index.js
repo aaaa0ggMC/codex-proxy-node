@@ -1,19 +1,57 @@
-// The checkpoint tool exists because of how this proxy runs, not because any particular plugin
-// has something to say.
-//
-// A client may compact its history between turns, which drops old tool results: a file path, a
-// document id, a decision, anything the model was told earlier can vanish. A model that knows this
-// can save what it does not want to lose, and the proxy hands it back on later turns.
-//
-// Nothing here decides what is worth keeping. That judgement is the model's.
+// Optional model-authored notes. The core automatically archives tool evidence; this tool adds
+// decisions and progress that were never themselves returned by a source tool.
+import { CONTEXT_TOOL } from "../../src/context.js";
+import { toolName } from "../../src/sdk.js";
+
+// The plugin owns its wire name; prose references are built through `ref`, so the prefix lives
+// only in src/agent/names.js.
+const NAME = "checkpoint";
+const NAMESPACE = true;
+const ref = (tool) => toolName(NAME, tool, { namespace: NAMESPACE });
+
+// User-facing documentation for the console's plugin page. Plain Markdown; the console renders it
+// with the small renderer in src/markdown.js.
+const DOCS = [
+  "# checkpoint",
+  "",
+  "An optional tool for the model to save a short note of decisions or progress.",
+  "",
+  "    user: remember which deck we were in when you answer",
+  `          └── ${ref("save")} writes it, and the proxy hands it back on later turns`,
+  "",
+  "## Why it exists",
+  "",
+  "- The core already archives ordinary tool results automatically. No checkpoint is needed for",
+  "  every document read or file path. This tool is for notes that do not exist in tool evidence.",
+  "- Notes are not source evidence. Retrieve the original before quoting facts.",
+  "",
+  "## How it works",
+  "",
+  "- The tool's result carries a `<checkpoint>` block. The core lifts it out of the result, the",
+  "  transport writes it into the conversation, and the next request re-appends it as a message the",
+  "  model sees again.",
+  "- Restore requires the client to keep either the checkpoint block or the core's latest thinking",
+  "  reference. A checkpoint cannot recover a conversation whose references were all removed.",
+  "",
+  "## Notes",
+  "",
+  `- Use it for analysis progress and decisions; use \`${CONTEXT_TOOL}\` for retained originals.`,
+  "- Keep a note short and stable: the same fact should always produce the same text, or the",
+  "  provider's prompt prefix changes and its cache is lost.",
+  "- It travels through the client's history and shows in its thinking panel, so keep secrets out",
+  "  of it.",
+  "",
+].join("\n");
+
 export default {
-  name: "checkpoint",
-  namespace: true,
+  name: NAME,
+  namespace: NAMESPACE,
+  docs: DOCS,
   tools: [
     {
       name: "save",
       description:
-        "Save a short note that must survive context compaction. This applies to the proxy_* tools only: the client shortens its history between messages and what gets dropped is their results, so anything you learned from proxy_docs_* or proxy_filesearch_* that you will need again belongs here — file paths, document ids, which page you were on, results that are expensive to re-derive. State held by the client's own tools does not need saving. Saved notes are handed back to you automatically on later turns; saving is free and repeating it is harmless.",
+        `Optionally save a short note of decisions or progress for later turns. The core already archives local tool results automatically, so do not checkpoint every file read. A note is not source evidence: retrieve original tool results with ${CONTEXT_TOOL} before quoting facts. Restoring notes requires the client to preserve the thinking reference or checkpoint block.`,
       parameters: {
         type: "object",
         properties: {

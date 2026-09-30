@@ -4,7 +4,13 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { outlineOf, searchPages } from "../src/docs/document.js";
+import { parsePptx, slideToSvg } from "../src/docs/pptx.js";
+import { toolName } from "../src/sdk.js";
 import { buildRegistry, loadPlugins } from "../src/plugins/loader.js";
+import { setOfficeConverter } from "../src/docs/settings.js";
+
+// Office rendering goes through LibreOffice WASM (~a minute per file); a fixture must not pay that.
+setOfficeConverter(false);
 import { writeZip } from "../test-support/zip-build.js";
 import { makePng } from "../test-support/png.js";
 
@@ -230,4 +236,47 @@ test("a lost document id is recoverable in one call, and reopening is cached", a
   // What a client with a compacted history has left: the path, not the id.
   const page = await registry.call("proxy_docs_read_page", JSON.stringify({ doc: file, page: 1, images: false }));
   assert.match(page[0].text, /Intro to widgets/);
+});
+
+test("a truncated outline names the tool the caller supplies, not a hardcoded one", async () => {
+  const document = {
+    name: "deck.pptx",
+    kind: "pptx",
+    bytes: 2048,
+    pageCount: 3,
+    pageLabel: "slide",
+    text: async (page) => `slide ${page} body`,
+  };
+  // The docs plugin passes its own resolved name; document.js must reproduce it verbatim.
+  const named = await outlineOf(document, { maxPages: 1, readTool: "proxy2_docs_read_page" });
+  assert.match(named, /call proxy2_docs_read_page for those/);
+  const bare = await outlineOf(document, { maxPages: 1 });
+  assert.doesNotMatch(bare, /proxy_|__/, "document.js must not hardcode a tool name");
+});
+
+test("the docs plugin prose is built from the same name the registry declares", async () => {
+  const registry = buildRegistry(await loadPlugins(path.join(import.meta.dirname, "..", "plugins")));
+  const open = toolName("docs", "open");
+  assert.ok(registry.names().has(open), `registry should declare ${open}`);
+  assert.ok(registry.reference("docs").includes(open), "the injected docs reference must use the declared name");
+});
+
+test("a pptx slide is rendered from its shapes, text and pictures, not just its media", async () => {
+  const slide = `<p:sld><p:spTree>
+<p:sp><p:spPr><a:xfrm><a:off x="838200" y="838200"/><a:ext cx="6858000" cy="1143000"/></a:xfrm><a:solidFill><a:srgbClr val="FFCC00"/></a:solidFill></p:spPr><p:txBody><a:p><a:r><a:rPr sz="2800" b="1"/><a:t>Quarterly Revenue</a:t></a:r></a:p></p:txBody></p:sp>
+<p:pic><p:blipFill><a:blip r:embed="rId2"/></p:blipFill><p:spPr><a:xfrm><a:off x="838200" y="2286000"/><a:ext cx="2000000" cy="1500000"/></a:xfrm></p:spPr></p:pic>
+</p:spTree></p:sld>`;
+  const deck = parsePptx(
+    writeZip([
+      ["ppt/presentation.xml", `<p:presentation><p:sldIdLst><p:sldId r:id="rId1"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`],
+      ["ppt/_rels/presentation.xml.rels", `<Relationships><Relationship Id="rId1" Type="t/slide" Target="slides/slide1.xml"/></Relationships>`],
+      ["ppt/slides/slide1.xml", slide],
+      ["ppt/slides/_rels/slide1.xml.rels", `<Relationships><Relationship Id="rId2" Type="t/image" Target="../media/pic.png"/></Relationships>`],
+      ["ppt/media/pic.png", tinyPng],
+    ]),
+  );
+  const svg = slideToSvg(deck.slides[0], deck.size);
+  assert.match(svg, /Quarterly Revenue/, "the slide text is drawn");
+  assert.match(svg, /<rect /, "the shape is drawn");
+  assert.match(svg, /<image /, "the picture is drawn");
 });

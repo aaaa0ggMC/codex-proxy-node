@@ -1,5 +1,13 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { toolName } from "../../src/sdk.js";
+
+// The plugin owns its wire name; prose references are built through `ref`, and a sibling plugin
+// is referenced by its own name too, so the prefix lives only in src/agent/names.js.
+const NAME = "filesearch";
+const NAMESPACE = true;
+const ref = (tool) => toolName(NAME, tool, { namespace: NAMESPACE });
+const docsOpen = toolName("docs", "open");
 
 // Read-only file search, deliberately without a listing tool.
 //
@@ -93,14 +101,52 @@ const MAX_READ_BYTES = 2 * 1024 * 1024;
 const DEFAULT_LINES = 400;
 const MAX_LINES = 2000;
 
+// User-facing documentation for the console's plugin page. Plain Markdown; the console renders it
+// with the small renderer in src/markdown.js.
+const DOCS = [
+  "# filesearch",
+  "",
+  "Find a file by name when nobody remembers where it went, and read it as text.",
+  "",
+  "    CODEX_PROXY_FILE_ROOTS=/storage/emulated/0/Download:/storage/emulated/0/Documents",
+  "    user: find the notes about the camping trip",
+  `          └── a ranked list of paths, then ${ref("read")} opens one as text`,
+  "",
+  "## Roots",
+  "",
+  "- Search only ever looks under the folders in `CODEX_PROXY_FILE_ROOTS`, colon-separated. Unset,",
+  "  it defaults to `Download` and `Documents` on shared storage.",
+  "- Every returned path is under one of those roots, and the plugin never writes anything: it is",
+  "  read-only by design.",
+  "",
+  "## Tools",
+  "",
+  `- **\`${ref("search")} <query>\`** — a fuzzy match on the file name first, then on the whole`,
+  "  path. Ranked best first; `limit` asks for at most 20 results, 8 by default.",
+  `- **\`${ref("read")} <path>\`** — one window of lines of a text file: \`from_line\` (default 1) and`,
+  "  `lines` (default 400, at most 2000). Files up to 2MB.",
+  "",
+  "## Notes",
+  "",
+  "- There is no directory listing and no way to walk a tree. The index behind the search is",
+  "  bounded: four levels of nesting, twenty thousand entries, refreshed once a minute.",
+  "- Hidden entries are skipped, and a folder that cannot be read is skipped rather than failing",
+  "  the whole search.",
+  `- It reads text only. For \`.pdf\`, \`.pptx\` and the other document formats use \`${docsOpen}\`, which`,
+  "  handles images and pagination.",
+  "- A binary file is refused rather than printed as garbage.",
+  "",
+].join("\n");
+
 export default {
-  name: "filesearch",
-  namespace: true,
+  name: NAME,
+  namespace: NAMESPACE,
+  docs: DOCS,
   tools: [
     {
       name: "search",
       description:
-        "Find files by fuzzy name or partial path. Read-only, restricted to the configured folders, and there is no way to list a directory. A hit can be opened: use filesearch__read for text files and docs__open for .pdf and .pptx. It cannot read file contents by itself.",
+        `Find files by fuzzy name or partial path. Read-only, restricted to the configured folders, and there is no way to list a directory. A hit can be opened: use ${ref("read")} for text files and ${docsOpen} for .pdf and .pptx. It cannot read file contents by itself.`,
       parameters: {
         type: "object",
         properties: {
@@ -133,11 +179,11 @@ export default {
     {
       name: "read",
       description:
-        "Read a text file by path, one window of lines at a time. Read-only and restricted to the configured folders. Use this for .md, .txt, .json, .csv, .log, .srt and source code. It cannot read .pdf or .pptx — use docs__open for those.",
+        `Read a text file by path, one window of lines at a time. Read-only and restricted to the configured folders. Use this for .md, .txt, .json, .csv, .log, .srt and source code. It cannot read .pdf or .pptx — use ${docsOpen} for those.`,
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Absolute path, as returned by filesearch__search" },
+          path: { type: "string", description: `Absolute path, as returned by ${ref("search")}` },
           from_line: { type: "number", description: "1-based first line, default 1" },
           lines: { type: "number", description: "How many lines, default 400" },
         },
@@ -152,7 +198,7 @@ export default {
         const extension = path.extname(target).toLowerCase();
         if (!TEXT_EXTENSIONS.includes(extension)) {
           throw new Error(
-            `filesearch__read cannot read ${extension || "a file without an extension"}; it handles text. For .pdf and .pptx use docs__open.`,
+            `${ref("read")} cannot read ${extension || "a file without an extension"}; it handles text. For .pdf and .pptx use ${docsOpen}.`,
           );
         }
         const info = await stat(target).catch(() => null);

@@ -1,6 +1,6 @@
 import { boolValue, defaultedString, stableId, stringValue } from "./util.js";
 import { stripNotes, stripWrapper } from "./notes.js";
-import { extractCheckpoints } from "./checkpoints.js";
+import { fenceSources, liftCarried } from "./sdk.js";
 import {
   newOpenAIResponse,
   openAIOutputItem,
@@ -69,7 +69,10 @@ export function normalizeResponsesInput(input) {
   throw new Error("input must be a string, object, or array");
 }
 
-export function buildResponsesRequestFromChat(raw, { webSearch = false, searchAliases = false } = {}) {
+export function buildResponsesRequestFromChat(
+  raw,
+  { webSearch = false, searchAliases = false, restoreText = null } = {},
+) {
   const model = stringValue(raw, "model");
   if (model === "") throw new Error("missing required field: model");
   const { upstreamModel, modelWantsSearch } = resolveModel(model, searchAliases);
@@ -103,15 +106,19 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false, searchAl
         // Providers with thinking mode require their reasoning back verbatim on the next turn
         // (DeepSeek answers 400 otherwise), so it is replayed as a reasoning item with our own
         // wrapper and bookkeeping removed.
-        const fromReasoning = extractCheckpoints(stringValue(item, "reasoning_content"));
+        const fromReasoning = liftCarried(stringValue(item, "reasoning_content"));
         carried.push(...fromReasoning.blocks);
         const reasoning = stripWrapper(fromReasoning.cleaned);
         if (reasoning !== "") {
           input.push({ type: "reasoning", content: [{ type: "reasoning_text", text: reasoning }] });
         }
-        const fromContent = extractCheckpoints(chatContentText(item.content));
+        const fromContent = liftCarried(chatContentText(item.content));
         carried.push(...fromContent.blocks);
-        const text = stripNotes(fromContent.cleaned);
+        // A rendered diagram comes back to us as generated markup the model never wrote; the
+        // plugin restores its own compact source in place, using the carried <plugin-fence> block.
+        const fences = fenceSources([...fromReasoning.blocks, ...fromContent.blocks]);
+        const restored = typeof restoreText === "function" ? restoreText(fromContent.cleaned, { fences }) : fromContent.cleaned;
+        const text = stripNotes(restored);
         if (text !== "") input.push({ role: "assistant", content: text });
         if (Array.isArray(item.tool_calls)) {
           for (const [index, toolCall] of item.tool_calls.entries()) {
@@ -136,10 +143,12 @@ export function buildResponsesRequestFromChat(raw, { webSearch = false, searchAl
     }
   }
   if (input.length === 0) input.push({ role: "user", content: "" });
-  if (carried.length > 0) {
-    // Appended at the tail. Instructions sit at the front of the prompt, and touching those would
-    // cost the entire cached prefix; de-duplicated so the same history yields the same bytes.
-    const unique = [...new Set(carried)];
+  // Only state the model must keep is re-injected. A <plugin-fence> is not: its whole purpose was
+  // to restore the model's own text above, and re-injecting it would tell the model its answer was
+  // processed. Appended at the tail; de-duplicated so the same history yields the same bytes.
+  const keep = carried.filter((block) => block.tag !== "plugin-fence").map((block) => block.body);
+  if (keep.length > 0) {
+    const unique = [...new Set(keep)];
     input.push({
       role: "developer",
       content: `Context carried over from earlier turns:\n${unique.join("\n")}`,
@@ -219,8 +228,8 @@ export async function aggregateResponsesStream(events, upstream) {
     }
   }
 
-  if (agg.output.length === 0 && agg.outputText !== "") {
-    agg.output = [synthesizedMessageItem(agg.outputText)];
+  if (!agg.output.some((item) => item?.type === "message") && agg.outputText !== "") {
+    agg.output.push(synthesizedMessageItem(agg.outputText));
   }
   if (agg.outputText === "") agg.outputText = outputTextFromItems(agg.output);
   return agg;

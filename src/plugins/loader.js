@@ -8,7 +8,7 @@ import { ToolRegistry } from "../agent/tools.js";
 //
 //	export default {
 //	  name: "docs",
-//	  namespace: true,                       // optional: prefix tools with "docs__"
+//	  namespace: true,                       // optional: default; qualifies tools as <prefix>_<plugin>_<tool>
 //	  instructions: "…",                     // optional: a Skill's prompt fragment
 //	  ingest: async (parts, ctx) => parts,   // optional: rewrite attachment content
 //	  tools: [{ name, description, parameters, run, timeoutMs }],

@@ -1,3 +1,5 @@
+import { carriedBlock, normalize, parseCarried, read } from "./sdk.js";
+
 // A checkpoint is state we want to survive the client compacting its history.
 //
 // It rides the thinking channel: the client folds it away, stores it, and replays it with the rest
@@ -5,30 +7,25 @@
 // context. That makes the client's own history the storage, so no session id and no server-side
 // conversation state is needed.
 //
-// Deliberately NOT inside <ignore>: notes are bookkeeping and get removed, a checkpoint is content
-// that must come back.
+// This is the carried disposition of the thinking channel; the parser and the wire form live in
+// src/sdk.js, next to the ignored disposition that bookkeeping uses.
 export const CHECKPOINT_OPEN = "<checkpoint>";
 export const CHECKPOINT_CLOSE = "</checkpoint>";
 
-const PATTERN = /<checkpoint\b[^>]*>([\s\S]*?)<\/checkpoint\s*>/gi;
-
 export function checkpoint(text) {
-  return `${CHECKPOINT_OPEN}${String(text).trim()}${CHECKPOINT_CLOSE}`;
+  return carriedBlock("checkpoint", { body: String(text).trim() });
 }
 
-// extractCheckpoints pulls the blocks out of a replayed message and returns the text without them,
-// so a checkpoint is never fed to the provider twice.
+// extractCheckpoints pulls every carried block out of a replayed message and returns the text
+// without them, so the same content is never fed to the provider twice.
 export function extractCheckpoints(text) {
-  if (typeof text !== "string" || !text.includes(CHECKPOINT_OPEN)) return { cleaned: text, blocks: [] };
-  const blocks = [];
-  const cleaned = text.replace(PATTERN, (_match, inner) => {
-    const value = String(inner).trim();
-    if (value !== "") blocks.push(value);
-    return "";
-  });
-  return { cleaned: cleaned.replace(/\n{3,}/g, "\n\n").trim(), blocks };
+  if (typeof text !== "string" || !text.includes("<")) return { cleaned: text, blocks: [] };
+  const { carried } = read(text, { ignored: false });
+  if (carried.length === 0) return { cleaned: text, blocks: [] };
+  const { cleaned } = parseCarried(text);
+  return { cleaned: normalize(cleaned), blocks: carried.map((block) => block.body) };
 }
 
 export function hasCheckpoint(text) {
-  return typeof text === "string" && text.includes(CHECKPOINT_OPEN);
+  return typeof text === "string" && parseCarried(text).blocks.length > 0;
 }

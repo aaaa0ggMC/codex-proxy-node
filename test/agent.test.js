@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ToolRegistry, normalizeToolResult } from "../src/agent/tools.js";
 import { mergeTools, runAgent } from "../src/agent/loop.js";
+import { ContextStore } from "../src/context-store.js";
+import { ConversationContext } from "../src/context.js";
 
 const textTurn = (text) => [
   { type: "response.output_text.delta", data: { delta: text } },
@@ -97,10 +99,12 @@ test("runAgent runs a local tool, feeds the result back, and hides the call", as
   assert.equal(fake.payloads.length, 2, "the loop must make a second turn");
   const replay = fake.payloads[1].input;
   assert.deepEqual(replay[0], { type: "function_call", call_id: "call_1", name: "proxy_docs_read_page", arguments: '{"page":2}' });
-  assert.deepEqual(replay[1].output, [
+  const parts = replay[1].output;
+  assert.deepEqual(parts.slice(0, 2), [
     { type: "input_text", text: "page 2" },
     { type: "input_image", image_url: "data:image/png;base64,AAAA" },
   ]);
+  assert.match(parts[2].text, /^\[image handle: img_[a-f0-9]+ —/, "the model is given a handle for the image");
 
   const declarations = fake.payloads[0].tools.map((t) => t.name);
   assert.deepEqual(declarations, ["proxy_docs_read_page"]);
@@ -167,4 +171,109 @@ test("normalizeToolResult accepts the three content part kinds only", () => {
     { type: "input_image", image_url: "u" },
   ]);
   assert.throws(() => normalizeToolResult([{ type: "text" }]), /must be input_text, input_image or input_audio/);
+});
+
+test("a carried block in a tool result reaches thinking but is stripped before the model sees it", async () => {
+  const fake = scripted([
+    toolTurn("proxy_checkpoint_save", { text: "note" }, "call_cp"),
+    textTurn("ok"),
+  ]);
+  const registry = new ToolRegistry().register({
+    name: "checkpoint",
+    tools: [
+      {
+        name: "save",
+        parameters: { type: "object", properties: { text: { type: "string" } } },
+        run: async () => "Saved.\n<checkpoint>note</checkpoint>",
+      },
+    ],
+  });
+
+  const events = await collect(runAgent({ stream: fake.stream, request: { input: [] }, registry }));
+  const checkpointEvent = events.find((e) => e.type === "codex_proxy.checkpoint");
+  assert.deepEqual(checkpointEvent.data.blocks, ["note"], "the block still rides the thinking channel");
+
+  const fedBack = fake.payloads[1].input.find((i) => i.type === "function_call_output");
+  assert.equal(fedBack.output, "Saved.", "only the human-readable part is fed back");
+  assert.ok(!JSON.stringify(fake.payloads[1].input).includes("<checkpoint>"), "no proxy markup reaches the model");
+});
+
+test("a checkpoint never comes back to the model as markup, on the same turn or on replay", async () => {
+  const store = new ContextStore();
+  const context = new ConversationContext(store);
+  const payloads = [];
+  let turn = 0;
+  const stream = async (payload) => {
+    payloads.push(structuredClone(payload));
+    const events = turn++ === 0
+      ? [
+          { type: "response.output_item.done", data: { item: { type: "function_call", call_id: "call_cp", name: "proxy_checkpoint_save", arguments: '{"text":"deck = /d/a.pptx"}' } } },
+          { type: "response.completed", data: { response: { id: "r1", status: "completed" } } },
+        ]
+      : [
+          { type: "response.output_text.delta", data: { delta: "ok" } },
+          { type: "response.completed", data: { response: { id: "r2", status: "completed" } } },
+        ];
+    return (async function* replay() { for (const event of events) yield event; })();
+  };
+  const registry = new ToolRegistry().register({
+    name: "checkpoint",
+    tools: [{ name: "save", parameters: {}, run: async () => "Saved.\n<checkpoint>deck = /d/a.pptx</checkpoint>" }],
+  });
+
+  await collect(runAgent({ stream, request: { input: [{ role: "user", content: "remember" }] }, registry, context }));
+  assert.ok(!JSON.stringify(payloads[1].input).includes("<checkpoint>"), "same-turn feedback is clean");
+
+  const marker = await context.marker();
+  const replayed = await new ConversationContext(store).restore([{ role: "assistant", content: marker }]);
+  assert.ok(!JSON.stringify(replayed).includes("<checkpoint>"), "restored evidence is clean");
+  assert.ok(JSON.stringify(replayed).includes("deck = /d/a.pptx"), "but the note itself still survives");
+});
+
+test("usage is summed across the turns of one request, not taken from the last one", async () => {
+  const usageTurn = (callId, usage) => [
+    { type: "response.output_item.done", data: { item: { type: "function_call", call_id: callId, name: "proxy_docs_read", arguments: "{}" } } },
+    { type: "response.completed", data: { response: { id: `r_${callId}`, status: "completed", usage } } },
+  ];
+  const finalTurn = (usage) => [
+    { type: "response.output_text.delta", data: { delta: "done" } },
+    { type: "response.completed", data: { response: { id: "r_final", status: "completed", usage } } },
+  ];
+  const fake = scripted([
+    usageTurn("c1", { input_tokens: 100, output_tokens: 10, total_tokens: 110, input_tokens_details: { cached_tokens: 40 }, output_tokens_details: { reasoning_tokens: 2 } }),
+    finalTurn({ input_tokens: 300, output_tokens: 20, total_tokens: 320, input_tokens_details: { cached_tokens: 250 }, output_tokens_details: { reasoning_tokens: 5 } }),
+  ]);
+  const registry = new ToolRegistry().register({ name: "docs", tools: [{ name: "read", parameters: {}, run: async () => "x" }] });
+
+  const events = await collect(runAgent({ stream: fake.stream, request: { input: [] }, registry }));
+  const completed = events.find((event) => event.type === "response.completed");
+  assert.deepEqual(completed.data.response.usage, {
+    input_tokens: 400,
+    output_tokens: 30,
+    total_tokens: 430,
+    input_tokens_details: { cached_tokens: 290 },
+    output_tokens_details: { reasoning_tokens: 7 },
+  });
+});
+
+test("a tool's progress is streamed while it runs, not only after it returns", async () => {
+  const fake = scripted([toolTurn("proxy_slow_work", {}, "c1"), textTurn("ok")]);
+  const registry = new ToolRegistry().register({
+    name: "slow",
+    tools: [
+      {
+        name: "work",
+        parameters: {},
+        run: async (_args, ctx) => {
+          ctx.progress("rendering with LibreOffice");
+          ctx.progress("halfway");
+          return "done";
+        },
+      },
+    ],
+  });
+
+  const events = await collect(runAgent({ stream: fake.stream, request: { input: [] }, registry }));
+  const progress = events.filter((event) => event.type === "codex_proxy.progress").map((event) => event.data.text);
+  assert.deepEqual(progress, ["rendering with LibreOffice", "halfway"]);
 });

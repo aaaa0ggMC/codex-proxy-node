@@ -1,0 +1,10 @@
+flowchart TD
+A([收到新请求]) --> B{内容是否完整？}
+B -->|是，继续处理| C[整理信息与生成方案]
+B -->|需要补充| D[补充必要信息]
+D -.-> B
+C --> E[检查结果并交付]
+E --> F([完成])
+style A fill:#eef2ff,stroke:#a5b4fc
+style B fill:#fff7ed,stroke:#e9bc85
+style F fill:#ecfdf5,stroke:#86cdb3

@@ -16,6 +16,7 @@ test("parseFlags applies the documented defaults", () => {
     reasoningEffort: "",
     maxTurns: 256,
     discardImages: 0,
+    contextDir: ".proxy-context",
     config: "",
     imageMaxEdge: 1100,
   });

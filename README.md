@@ -76,7 +76,9 @@ CODEX_PROXY_API_KEY='replace-with-a-long-random-key' node src/index.js --host 0.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/healthz` | Liveness probe. Never touches the upstream. |
+| `GET` | `/healthz` | Liveness probe. Never touches the upstream. Advertises the plugin console (below) when one is served. |
+| `GET` | `/admin/plugins` | Plugin toggle console, for switching a plugin off without a restart. Only served when no proxy API key is set. |
+| `GET` | `/admin/plugins.json` | The same state as JSON, for a supervisor. |
 | `GET` | `/v1/models` | Model catalogue from the Codex backend. |
 | `GET` | `/v1/usage` | Codex quota windows, with a cache that never delays a chat request. |
 | `POST` | `/v1/responses` | Responses API. `/v1/responses` stays a pass-through. |
@@ -155,6 +157,25 @@ the model. A text-only tool result stays a plain string.
 The `/v1/responses` route stays a pass-through, so it forwards whatever content parts the caller
 sends.
 
+## Plugin console
+
+Plugins reload only on restart, on purpose: swapping tools mid-conversation would invalidate the
+cached prompt prefix. What does not need a restart is whether a plugin is *enabled*, so the proxy
+serves a small console at `/admin/plugins` with a toggle per plugin. It writes the choice to
+`plugins-state.json`, and the next request picks it up.
+
+The console is served without a key, so it is only exposed when no proxy API key is configured —
+a key-protected deployment does not get an unauthenticated control plane. In that case `/healthz`
+stays a plain liveness answer; otherwise it advertises where the console lives:
+
+```json
+{ "ok": true, "ui": "/admin/plugins", "uiLabel": "Plugins" }
+```
+
+MCPHub reads that payload and puts a clickable panel entry on the service card, so the toggles are
+one click away under `/apps/codex-proxy/admin/plugins`. Any supervisor that can read the health
+body can do the same.
+
 ## Usage endpoint
 
 ```bash
@@ -224,6 +245,7 @@ Layout, so a new feature has an obvious home:
 | `src/auth.js` | Reads `~/.codex/auth.json` and refreshes the ChatGPT access token. |
 | `src/codex.js` | The three upstream calls: models, streaming responses, usage. |
 | `src/compat.js` | Chat Completions → Responses translation, including attachments. |
+| `src/transforms.js` | Answer transforms: plugin-rendered fenced blocks, and restoring them on replay. |
 | `src/schema.js` | OpenAI-compatible response shapes and builders. |
 | `src/usage.js` | Quota normalisation, caching and one-line formatting. |
 | `src/server.js` | Routes, middlewares, SSE streaming. |
@@ -245,18 +267,60 @@ Tests live in `test/*.test.js`; `test-support/helpers.js` holds the shared test 
   `--upstream` for any OpenAI-compatible endpoint (DeepSeek, StepFun, a local server). The
   `openai` provider bridges the canonical Responses format down to Chat Completions and back.
 - **Plugins**: drop a folder into `plugins/` and its tools are offered to the model. The proxy runs
-  them itself, including tools that return images. See [plugins/README.md](plugins/README.md).
+  them itself, including tools that return images. A plugin can also transform the answer and
+  contribute context: the bundled [`flowchart`](plugins/flowchart/README.md) plugin renders a
+  model's mermaid into an SVG and carries the source on the thinking channel, and the
+  core activates a whole loaded module when a user says `@plugin:<name>`: tools, instructions,
+  transforms and model-facing reference, even when globally off by default. Console docs are for
+  people and are never injected; no separate `lore` field or mentions helper is required. See [plugins/README.md](plugins/README.md).
+
+## Plugin context across turns
+
+The core automatically archives local tool results, attachment descriptors, plugin contributions
+and carried notes. Plugins normally just return their result; the model does not need to call a
+checkpoint tool. A short `<proxy-context>` reference travels **only in thinking**
+(`reasoning_content` for Chat Completions, a reasoning item for Responses). The answer body is
+unchanged. Streaming and non-streaming requests both support this.
+
+For Rikkahub, keep and replay the thinking field. Each new reply renews the latest reference, whose
+snapshot includes earlier retained results, so older messages can be removed while the latest
+reference remains. If the client removes **all** references, the proxy cannot identify the
+conversation; it never guesses by a file name, user name or similar-looking chat text.
+
+Small results are replayed as historical tool evidence. Results over 8,000 characters get an
+explicit 2,000-character excerpt in the working prompt; the original text and images remain
+available through the core's `proxy_context_read` tool. Text retrieval uses character offsets and
+returns at most 12,000 characters per call; images/audio are retrieved individually. Reading the
+archive never re-executes a plugin action. Saved notes are labelled separately from source results.
+
+The CLI stores this local data in `.proxy-context/` (ignored by Git), surviving proxy restarts.
+Use `--context-dir /path/to/cache` to relocate it, or `--context-dir=''` for memory only. The store
+is bounded to 256 MiB and 4,096 blobs; snapshots retain up to 128 distinct results and replay up to
+32,000 characters of small results, plus their catalog. Oversized/dropped results and missing
+references are reported to the model; unavailable evidence must be read from its source again.
+This repairs context loss, but is not a guarantee that a model can never hallucinate.
+
+Existing conversations gain automatic retention after their next tool read; results lost before
+this change cannot be recovered from a reference that was never written. Context references grant
+access to their retained data, so treat exported thinking and the cache directory as conversation
+data. The built-in server authenticates requests with its existing API key.
+
+Plugins retain advanced `contribute`, carried-block and restore hooks. A plugin or individual tool
+can set `context: "manual"` to opt its tool results out of automatic archival and excerpting. See
+[the plugin contract](plugins/README.md).
 
 ## The cache rule
 
-Everything the proxy puts into an upstream request must be a **pure function of the client
-request**: same history in, same bytes out. Providers cache by prompt prefix, so a random id, a
+Prompt construction is deterministic for the same client history and retained evidence. Providers
+cache by prompt prefix, so a random id, a
 timestamp, or a tool set that varies per request silently destroys the hit rate for the whole
 conversation.
 
 That is why tool declarations are sorted, tool call ids are derived from content (`stableId` in
 `src/util.js`), per-request context is appended at the tail rather than injected into
-`instructions`, history is never rewritten, and plugins reload only on restart.
+`instructions`, and plugins reload only on restart. Context references are stripped before the
+provider sees them; historical results are inserted before the newest user message. New evidence
+or cache eviction can change that restored suffix, so cross-request cache hits are not guaranteed.
 
 The agent loop's own turns are appended at the tail, so the shared prefix — the whole conversation
 history — still hits the cache; only the tokens after the last user turn are recomputed.

@@ -36,7 +36,9 @@ test("stripNotes removes a note and leaves the surrounding answer alone", () => 
 
 test("stripNotes keeps real model reasoning", () => {
   const history = `<th><mth>weighing options</mth>${note("proxy_docs_search …")}</th>`;
-  assert.equal(stripNotes(history), "<th><mth>weighing options</mth></th>");
+  const out = stripNotes(history);
+  assert.match(out, /weighing options/, "the model reasoning survives");
+  assert.ok(!out.includes("<ignore"), "the note is gone");
 });
 
 test("stripNotes leaves nothing behind for awkward shapes", () => {
@@ -70,18 +72,21 @@ test("a replayed thinking block never reaches the model", () => {
   assert.ok(!payload.includes("<ignore"), "no marker may survive translation");
 });
 
-test("a disable_module switch is honoured once and never reaches the model", async () => {
+test("module switches are read from every user message and never reach the model", async () => {
   const { applyModuleSwitches } = await import("../src/modules.js");
   const messages = [
     { role: "system", content: "be terse" },
     { role: "user", content: [{ type: "text", text: "look at the deck\n<disable_module>docs</disable_module>" }] },
     { role: "assistant", content: 'ok <disable_module name="other" />' },
+    { role: "user", content: "and <disable_module>other</disable_module> too" },
   ];
 
-  const disabled = applyModuleSwitches(messages, ["docs", "other"]);
-  assert.deepEqual([...disabled], ["docs"], "only the first user message carries the switch");
+  const { disabled, switches } = applyModuleSwitches(messages, ["docs", "other"]);
+  assert.deepEqual([...disabled].sort(), ["docs", "other"], "a later user message switches too");
+  assert.equal(switches.length, 2);
   assert.equal(messages[1].content[0].text, "look at the deck");
-  assert.ok(!messages[2].content.includes("disable_module"), "the tag is stripped everywhere");
+  assert.ok(!messages[2].content.includes("disable_module"), "a tag is stripped wherever it appears");
+  assert.equal(messages[3].content, "and  too");
 });
 
 test("the spellings and the all/except form are understood", async () => {
@@ -101,7 +106,7 @@ test("the spellings and the all/except form are understood", async () => {
         "<disable_modules>all</disable_modules><enable_modules>docs</enable_modules> please read it",
     },
   ];
-  const disabled = applyModuleSwitches(messages, ["docs", "other", "stepfun"]);
+  const { disabled } = applyModuleSwitches(messages, ["docs", "other", "stepfun"]);
   assert.deepEqual([...disabled].sort(), ["other", "stepfun"], "all, except docs");
   assert.equal(messages[0].content, "please read it");
 });
@@ -115,8 +120,9 @@ test("the switch works on the responses input shape too", async () => {
     },
     { role: "user", content: [{ type: "input_text", text: "and page 2?" }] },
   ];
-  const disabled = applyInputSwitches(input, ["docs", "other"]);
+  const { disabled, switches } = applyInputSwitches(input, ["docs", "other"]);
   assert.deepEqual([...disabled], ["other"], "a plain-string content switches too");
+  assert.deepEqual(switches, [{ verb: "disable", name: "all" }, { verb: "enable", name: "docs" }]);
   assert.equal(input[0].content, "please read the deck");
 });
 

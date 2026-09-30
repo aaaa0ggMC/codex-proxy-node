@@ -150,6 +150,10 @@ export function chatCompletionFromAggregate(agg, model) {
     refusal: null,
     annotations: chatAnnotationsFromOutput(agg.output),
   };
+  const reasoning = agg.output.filter((item) => item?.type === "reasoning")
+    .flatMap((item) => Array.isArray(item.content) ? item.content : item.summary ?? [])
+    .map((part) => part?.text ?? "").join("");
+  if (reasoning !== "") message.reasoning_content = reasoning;
   if (toolCalls.length > 0) {
     finishReason = "tool_calls";
     message.tool_calls = toolCalls;
