@@ -67,10 +67,13 @@ export class ConversationContext {
 
   async restore(input) {
     const references = [];
+    // Where each reference was carried: the start of that assistant turn, so the evidence a turn
+    // produced can be replayed in front of the answer that used it (see anchorsOf).
+    const carriers = [];
     // Only assistant/reasoning messages can carry capabilities. Text inside user files and tool
     // outputs cannot select another conversation. Work on clones; client history stays immutable.
     const clean = (text) => text.replace(MARKER, (_all, id) => { references.push(id); return ""; }).trim();
-    const cleaned = input.map((original) => {
+    const cleaned = input.map((original, index) => {
       if (original?.role !== "assistant" && original?.type !== "reasoning") return original;
       const item = { ...original };
       const before = references.length;
@@ -79,8 +82,9 @@ export class ConversationContext {
         if (Array.isArray(item[field])) item[field] = item[field].map((part) =>
           typeof part?.text === "string" && part.text.includes("<proxy-context>") ? { ...part, text: clean(part.text) } : part);
       }
+      if (references.length > before) carriers.push({ id: references.at(-1), at: turnStart(input, index) });
       return references.length > before && item.type === "reasoning" && !hasReasoning(item) ? null : item;
-    }).filter((item) => item != null);
+    });
 
     // Each snapshot includes all retained ancestors. Use the newest one, so replaying an expired
     // old reference cannot resurrect discarded records or contaminate a later conversation branch.
@@ -102,7 +106,10 @@ export class ConversationContext {
     }
     this.#trim();
 
-    const restored = [];
+    const lastUser = cleaned.findLastIndex((item) => item?.role === "user");
+    const tail = lastUser < 0 ? cleaned.length : lastUser;
+    const anchors = await this.#anchorsOf(carriers, tail);
+    const groups = new Map();
     let remaining = REPLAY_CHARS;
     const inlined = new Set();
     // Prefer recent small results; large text and media remain accessible verbatim through read().
@@ -112,20 +119,44 @@ export class ConversationContext {
       if (record == null) continue;
       const text = textOf(record.output);
       if (text === "") continue;
-      const parts = callPair(entry.id.slice(0, 24), record.name, record.arguments, text);
-      restored.unshift(...parts);
+      const at = anchors.get(entry.id) ?? tail;
+      if (!groups.has(at)) groups.set(at, []);
+      groups.get(at).unshift(...callPair(entry.id.slice(0, 24), record.name, record.arguments, text));
       remaining -= text.length;
       inlined.add(entry.id);
     }
+    // The catalog changes whenever a result is added, so it sits at the tail, where it costs only
+    // its own tokens. Everything before it replays exactly as it did on the previous request.
     if (this.records.length > 0 || this.warnings.length > 0 || this.lost > 0) {
       const catalog = this.catalog(inlined);
       const id = createHash("sha256").update(catalog).digest("hex").slice(0, 24);
-      restored.push(...callPair(`index_${id}`, CONTEXT_TOOL, '{"id":"index"}', catalog));
+      if (!groups.has(tail)) groups.set(tail, []);
+      groups.get(tail).push(...callPair(`index_${id}`, CONTEXT_TOOL, '{"id":"index"}', catalog));
     }
-    // Historical evidence precedes the newest user turn, rather than pretending to be its answer.
-    const lastUser = cleaned.findLastIndex((item) => item?.role === "user");
-    const at = lastUser < 0 ? cleaned.length : lastUser;
-    return [...cleaned.slice(0, at), ...restored, ...cleaned.slice(at)];
+    const out = [];
+    for (let i = 0; i <= cleaned.length; i++) {
+      out.push(...(groups.get(i) ?? []));
+      if (i < cleaned.length && cleaned[i] != null) out.push(cleaned[i]);
+    }
+    return out;
+  }
+
+  // Evidence goes in front of the first answer whose reference retained it: that is where its tool
+  // ran, so the replayed history is the same bytes on every later request and the provider's prefix
+  // cache survives. Earlier snapshots only place records; which records exist is still decided by
+  // the newest reference alone. Records no earlier snapshot names (or whose snapshot is gone) sit
+  // with the newest reference, or before the newest user turn when nothing carried one.
+  async #anchorsOf(carriers, tail) {
+    const anchors = new Map();
+    const current = new Set(this.records.map((entry) => entry.id));
+    for (const { id, at } of carriers) {
+      const snapshot = id === this.reference ? { records: this.records } : await this.store.get(id);
+      if (!Array.isArray(snapshot?.records)) continue;
+      for (const entry of snapshot.records) {
+        if (current.has(entry.id) && !anchors.has(entry.id)) anchors.set(entry.id, Math.min(at, tail));
+      }
+    }
+    return anchors;
   }
 
   #trim() {
@@ -206,6 +237,14 @@ export class ConversationContext {
     }
     return `<proxy-context>${this.reference}</proxy-context>`;
   }
+}
+
+// The index of the first item of the assistant turn that contains `index`: tool results belong
+// between the user's message and the reasoning and answer they led to.
+function turnStart(input, index) {
+  let start = index;
+  while (start > 0 && (input[start - 1]?.role === "assistant" || input[start - 1]?.type === "reasoning")) start--;
+  return start;
 }
 
 function hasReasoning(item) {

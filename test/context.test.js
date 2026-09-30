@@ -345,3 +345,34 @@ for (const api of ["chat", "responses"]) for (const streaming of [false, true]) 
     }
   });
 }
+
+test("replayed evidence stays in front of the answer that used it, so later requests share the prefix", async () => {
+  const store = new ContextStore();
+  const first = new ConversationContext(store);
+  await first.record("proxy_docs_read", '{"page":1}', "page one");
+  const one = await first.marker();
+  const turn2 = [
+    { role: "user", content: "Read page one." },
+    { type: "reasoning", content: [{ type: "reasoning_text", text: one }] },
+    { role: "assistant", content: "Page one says hello." },
+    { role: "user", content: "Now page two." },
+  ];
+  const second = new ConversationContext(store);
+  const sent2 = await second.restore(turn2);
+  await second.record("proxy_docs_read", '{"page":2}', "page two");
+  const two = await second.marker();
+  const turn3 = [...turn2,
+    { type: "reasoning", content: [{ type: "reasoning_text", text: two }] },
+    { role: "assistant", content: "Page two says goodbye." },
+    { role: "user", content: "Compare them." }];
+  const sent3 = await new ConversationContext(store).restore(turn3);
+
+  const catalog = (items) => new Set(items.filter((i) => i.call_id?.startsWith("ctx_index_")).map((i) => i.call_id));
+  const stable = (items) => { const skip = catalog(items); return items.filter((i) => !skip.has(i.call_id)); };
+  assert.deepEqual(stable(sent3).slice(0, stable(sent2).length), stable(sent2));
+  const at = (items, text) => items.findIndex((i) => i.output === text || i.content === text);
+  assert.ok(at(sent3, "page one") < at(sent3, "Page one says hello."));
+  assert.ok(at(sent3, "Now page two.") < at(sent3, "page two"));
+  assert.ok(at(sent3, "page two") < at(sent3, "Page two says goodbye."));
+  assert.equal(sent3.at(-1).content, "Compare them.");
+});
