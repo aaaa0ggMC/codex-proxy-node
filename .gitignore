@@ -8,3 +8,8 @@ config.json
 plugins-state.json
 # Retained tool evidence and conversation references (local data).
 .proxy-context/
+# Local debug scripts and outputs that reference personal documents.
+_docx*.jpg
+doctest.mjs
+lotest*.mjs
+patch-*.mjs
